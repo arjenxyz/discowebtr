@@ -1,26 +1,90 @@
-@import "tailwindcss";
+/* stylelint-disable at-rule-no-unknown */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+.scrollbar-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+.scrollbar-hidden::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+/* stylelint-enable at-rule-no-unknown */
+
+/* Sayfayı Zorla Siyah Yap */
+html, body {
+  background-color: #0a0a0c !important; /* Simsiyah */
+  color: white !important;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-height: 100%;
+  width: 100%;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Yıldız Animasyonu */
+@keyframes floatUp {
+  0% { transform: translateY(100vh) scale(0.5); opacity: 0; }
+  20% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateY(-10vh) scale(1); opacity: 0; }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@keyframes overviewFade {
+  0% { opacity: 0; transform: translateY(12px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.star-animate {
+  animation: floatUp linear infinite;
+}
+
+.overview-fade {
+  animation: overviewFade 0.6s ease both;
+}
+
+.overview-delay-1 {
+  animation-delay: 0.06s;
+}
+
+.overview-delay-2 {
+  animation-delay: 0.12s;
+}
+
+.overview-delay-3 {
+  animation-delay: 0.18s;
+}
+
+.role-glow {
+  position: relative;
+  isolation: isolate;
+}
+
+.role-glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  opacity: 0;
+  background: linear-gradient(135deg, transparent 0%, rgba(255, 255, 255, 0.18) 35%, transparent 65%);
+  transform: translateY(2px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.role-glow:hover {
+  box-shadow:
+    0 0 12px var(--role-color, rgba(99, 102, 241, 0.45)),
+    0 0 24px var(--role-color-soft, rgba(99, 102, 241, 0.2));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+}
+
+.role-glow:hover::after {
+  opacity: 1;
+  transform: translateY(0);
 }
