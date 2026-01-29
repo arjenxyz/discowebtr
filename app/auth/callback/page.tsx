@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function DiscordAuthCallbackPage() {
+// 1. Mantığı yürüten ana içeriği ayrı bir fonksiyon (component) haline getiriyoruz.
+function DiscordAuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState('Giriş doğrulanıyor...');
@@ -70,6 +71,23 @@ export default function DiscordAuthCallbackPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0b0d12] text-white">
       <p className="text-sm text-white/70">{status}</p>
+    </div>
+  );
+}
+
+// 2. Default export edilen ana sayfa bileşeni sadece Suspense ile sarmalıyor.
+export default function DiscordAuthCallbackPage() {
+  return (
+    <div className="bg-[#0b0d12]">
+      <Suspense
+        fallback={
+          <div className="flex min-h-screen items-center justify-center text-white">
+            <p className="text-sm text-white/70">Yükleniyor...</p>
+          </div>
+        }
+      >
+        <DiscordAuthCallbackContent />
+      </Suspense>
     </div>
   );
 }
