@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+// Link importunu sildik veya kalsın istiyorsan dursun ama aşağıda kullanmayacağız
 import Image from 'next/image';
 import { LuChevronDown, LuGift, LuLogOut, LuSend, LuSettings, LuTag } from 'react-icons/lu';
 import type { RefObject } from 'react';
@@ -10,7 +10,7 @@ type SettingsDropdownProps = {
   onToggle: () => void;
   onOpenSettings: () => void;
   onOpenTransfer: () => void;
-  logoutHref: string;
+  logoutHref: string; // Bu prop artık teknik olarak gereksiz ama type hatası vermemesi için kalsın
   menuRef: RefObject<HTMLDivElement | null>;
   profile?: {
     name: string;
@@ -25,13 +25,25 @@ export default function SettingsDropdown({
   onToggle,
   onOpenSettings,
   onOpenTransfer,
-  logoutHref,
   menuRef,
   profile,
   profileLoading,
 }: SettingsDropdownProps) {
   const displayName = profile?.name ?? 'Üye';
   const username = profile?.username ?? 'guest';
+
+  // YENİ EKLENEN FONKSİYON
+  const handleLogout = async () => {
+    try {
+      // API'ye POST isteği atıyoruz
+      await fetch('/api/auth/logout', { method: 'POST' });
+      // İşlem bitince ana sayfaya zorla yönlendiriyoruz (Cache temizlensin diye)
+      window.location.href = '/';
+    } catch {
+      // Hata olsa bile kullanıcıyı dışarı atalım
+      window.location.href = '/';
+    }
+  };
 
   return (
     <div ref={menuRef} className="relative">
@@ -101,13 +113,17 @@ export default function SettingsDropdown({
               <LuSettings className="h-3.5 w-3.5 text-indigo-300" />
               Ayarlar
             </button>
-            <Link
-              href={logoutHref}
+            
+            {/* DEĞİŞİKLİK BURADA: Link yerine button kullanıldı */}
+            <button
+              type="button"
+              onClick={handleLogout}
               className="flex w-full items-center gap-2 rounded-xl border border-white/5 bg-white/5 px-3 py-2 text-left text-xs text-white/70 transition hover:border-white/15 hover:text-white"
             >
               <LuLogOut className="h-3.5 w-3.5 text-rose-300" />
               Çıkış yap
-            </Link>
+            </button>
+
           </div>
         </div>
       )}
