@@ -50,8 +50,6 @@ const getOverviewData = async () => {
 
   const now = new Date();
   const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0)).toISOString();
-
   const activitySince = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
 
   const [

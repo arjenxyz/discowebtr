@@ -154,17 +154,15 @@ export default function AdminWalletPage() {
     setLoading(false);
   };
 
+  // DÜZELTME 1: Temizleme işlemi useEffect'ten çıkarıldı, aşağıda onChange içine taşındı.
+  // useEffect artık sadece arama (search) işlemiyle ilgileniyor.
   useEffect(() => {
     if (scope !== 'user') {
-      setSearchResults([]);
-      setSearchQuery('');
-      setSelectedMember(null);
       return;
     }
 
     const query = searchQuery.trim();
     if (query.length < 2) {
-      setSearchResults([]);
       return;
     }
 
@@ -184,6 +182,7 @@ export default function AdminWalletPage() {
       clearTimeout(timer);
     };
   }, [searchQuery, scope]);
+
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
@@ -210,7 +209,16 @@ export default function AdminWalletPage() {
             <label className="text-xs text-white/50">Kapsam</label>
             <select
               value={scope}
-              onChange={(event) => setScope(event.target.value as 'user' | 'all')}
+              // DÜZELTME 2: Temizleme işlemi buraya (event handler'a) taşındı.
+              onChange={(event) => {
+                const newScope = event.target.value as 'user' | 'all';
+                setScope(newScope);
+                if (newScope !== 'user') {
+                  setSearchResults([]);
+                  setSearchQuery('');
+                  setSelectedMember(null);
+                }
+              }}
               className="w-full rounded-xl border border-white/10 bg-[#0b0d12]/70 px-4 py-3 text-sm text-white/80 focus:border-indigo-400 focus:outline-none"
             >
               <option value="user">Tek Kullanıcı</option>
@@ -225,7 +233,13 @@ export default function AdminWalletPage() {
               <label className="text-xs text-white/50">Kullanıcı ara (nickname / username)</label>
               <input
                 value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setSearchQuery(value);
+                  if (value.trim().length < 2) {
+                    setSearchResults([]);
+                  }
+                }}
                 placeholder="Örn: night, newli"
                 className="w-full rounded-xl border border-white/10 bg-[#0b0d12]/70 px-4 py-3 text-sm text-white/80 focus:border-indigo-400 focus:outline-none"
               />

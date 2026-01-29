@@ -157,7 +157,6 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     loadProfile();
   }, []);
 
-
   useEffect(() => {
     if (!notificationMenuOpen) {
       return undefined;
@@ -193,7 +192,6 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [accountMenuOpen]);
-
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -254,6 +252,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                     <p className="px-3 text-[11px] uppercase tracking-[0.3em] text-white/30">{group.title}</p>
                   )}
                   {group.items.map((item) => {
+                    // Durum 1: Dropdown Menü (Alt öğeleri var)
                     if ('children' in item && item.children) {
                       const isActive = pathname.startsWith('/admin/store');
                       const isOpen = storeMenuOpen && !collapsed;
@@ -320,17 +319,23 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                       );
                     }
 
-                    const active = pathname === item.href;
-                    return (
-                      <Link
-                        key={`${item.href}-${item.label}`}
-                        href={item.href}
-                        className={navItemClass(active, collapsed)}
-                      >
-                        <span className={navIconClass(active, collapsed)}>{item.icon}</span>
-                        {!collapsed && <span>{item.label}</span>}
-                      </Link>
-                    );
+                    // Durum 2: Tekil Link (href var mı kontrolü eklendi)
+                    if ('href' in item) {
+                      const active = pathname === item.href;
+                      return (
+                        <Link
+                          key={`${item.href}-${item.label}`}
+                          href={item.href}
+                          className={navItemClass(active, collapsed)}
+                        >
+                          <span className={navIconClass(active, collapsed)}>{item.icon}</span>
+                          {!collapsed && <span>{item.label}</span>}
+                        </Link>
+                      );
+                    }
+
+                    // Ne href ne de children varsa (Type safety için)
+                    return null;
                   })}
                 </div>
               ))}

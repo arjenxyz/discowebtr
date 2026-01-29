@@ -7,7 +7,7 @@ import type { Notification } from '../types';
 import type { Section } from '../types';
 import NotificationsDropdown from './NotificationsDropdown';
 import SettingsDropdown from './SettingsDropdown';
-import type { RefObject } from 'react';
+import type { RefObject, JSX } from 'react';
 
 
 type DashboardHeaderProps = {

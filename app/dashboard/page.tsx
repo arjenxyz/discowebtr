@@ -5,7 +5,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import DashboardHeader from './components/DashboardHeader';
-import type { Section } from './types';
 import OverviewSection from './components/OverviewSection';
 import ProfileSection from './components/ProfileSection';
 import StoreSection from './components/StoreSection';

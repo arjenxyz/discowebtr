@@ -12,7 +12,6 @@ type SidebarNavProps = {
   unauthorized: boolean;
   onNavigate: (section: Section) => void;
   profile: MemberProfile | null;
-  profileLoading: boolean;
 };
 
 const menuItemClass = (isActive: boolean, collapsed: boolean) =>
@@ -46,7 +45,6 @@ export default function SidebarNav({
   unauthorized,
   onNavigate,
   profile,
-  profileLoading,
 }: SidebarNavProps) {
   const [collapsed, setCollapsed] = useState(false);
 
