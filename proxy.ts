@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server';
 const IGNORED_PREFIXES = ['/maintenance', '/admin', '/api', '/_next'];
 const IGNORED_PATHS = ['/favicon.ico', '/robots.txt', '/sitemap.xml'];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
 	const { pathname, origin } = request.nextUrl;
 
 	if (IGNORED_PREFIXES.some((prefix) => pathname.startsWith(prefix)) || IGNORED_PATHS.includes(pathname)) {
