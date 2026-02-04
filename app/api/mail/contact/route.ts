@@ -1,0 +1,75 @@
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { createClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+type Database = {
+  public: {
+    Tables: {
+      system_mail_contacts: {
+        Row: { guild_id: string; user_id: string; subject: string; message: string; created_at: string | null };
+        Insert: { guild_id: string; user_id: string; subject: string; message: string; created_at?: string | null };
+        Update: { guild_id?: string; user_id?: string; subject?: string; message?: string; created_at?: string | null };
+        Relationships: [];
+      };
+    };
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
+    Enums: Record<string, never>;
+    CompositeTypes: Record<string, never>;
+  };
+};
+
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || '1465698764453838882';
+};
+
+const getSupabase = (): SupabaseClient<Database> | null => {
+  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    return null;
+  }
+  return createClient<Database>(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+};
+
+
+export async function POST(request: Request) {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return NextResponse.json({ error: 'missing_service_role' }, { status: 500 });
+  }
+
+  const cookieStore = await cookies();
+  const userId = cookieStore.get('discord_user_id')?.value ?? null;
+  if (!userId) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
+
+  const payload = (await request.json()) as { subject?: string; message?: string };
+  const subject = payload.subject?.trim() ?? '';
+  const message = payload.message?.trim() ?? '';
+
+  if (!subject || !message) {
+    return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
+  }
+
+  const selectedGuildId = await getSelectedGuildId();
+
+  const { error } = await supabase
+    .from('system_mail_contacts')
+    .insert({
+      guild_id: selectedGuildId,
+      user_id: userId,
+      subject,
+      message,
+    });
+
+  if (error) {
+    return NextResponse.json({ error: 'save_failed' }, { status: 500 });
+  }
+
+  return NextResponse.json({ status: 'ok' });
+}

@@ -4,8 +4,13 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { logWebEvent } from '@/lib/serverLogger';
 
 const GUILD_ID = process.env.DISCORD_GUILD_ID ?? '1465698764453838882';
-const ADMIN_ROLE_ID = process.env.DISCORD_ADMIN_ROLE_ID;
 const DEFAULT_SLUG = 'default';
+
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || GUILD_ID; // Fallback to default
+};
 
 const getSupabase = () => {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -17,27 +22,65 @@ const getSupabase = () => {
 };
 
 const isAdminUser = async () => {
-  const botToken = process.env.DISCORD_BOT_TOKEN;
-  if (!botToken || !ADMIN_ROLE_ID) {
+  try {
+    const botToken = process.env.DISCORD_BOT_TOKEN;
+    if (!botToken) {
+      console.log('promotions isAdminUser: No bot token');
+      return false;
+    }
+
+    const cookieStore = await cookies();
+    const userId = cookieStore.get('discord_user_id')?.value;
+    const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+    if (!userId || !selectedGuildId) {
+      console.log('promotions isAdminUser: Missing user ID or guild ID', { userId, selectedGuildId });
+      return false;
+    }
+
+    // Get admin role from server configuration
+    const supabase = getSupabase();
+    if (!supabase) {
+      console.log('promotions isAdminUser: No supabase client');
+      return false;
+    }
+
+    const { data: server } = await supabase
+      .from('servers')
+      .select('admin_role_id')
+      .eq('discord_id', selectedGuildId)
+      .maybeSingle();
+
+    console.log('promotions isAdminUser: Server data:', server);
+
+    if (!server?.admin_role_id) {
+      console.log('promotions isAdminUser: No admin role ID found');
+      return false;
+    }
+
+    console.log('promotions isAdminUser: Admin role ID:', server.admin_role_id);
+
+    // Check Discord API for user roles
+    const memberResponse = await fetch(`https://discord.com/api/guilds/${selectedGuildId}/members/${userId}`, {
+      headers: { Authorization: `Bot ${botToken}` },
+    });
+
+    console.log('promotions isAdminUser: Member response status:', memberResponse.status);
+
+    if (!memberResponse.ok) {
+      console.log('promotions isAdminUser: Member response not ok');
+      return false;
+    }
+
+    const member = (await memberResponse.json()) as { roles: string[] };
+    console.log('promotions isAdminUser: Member roles:', member.roles);
+    const hasRoleResult = member.roles.includes(server.admin_role_id);
+    console.log('promotions isAdminUser: Has admin role:', hasRoleResult);
+
+    return hasRoleResult;
+  } catch (error) {
+    console.error('promotions isAdminUser: Admin check failed:', error);
     return false;
   }
-
-  const cookieStore = await cookies();
-  const userId = cookieStore.get('discord_user_id')?.value;
-  if (!userId) {
-    return false;
-  }
-
-  const memberResponse = await fetch(`https://discord.com/api/guilds/${GUILD_ID}/members/${userId}`, {
-    headers: { Authorization: `Bot ${botToken}` },
-  });
-
-  if (!memberResponse.ok) {
-    return false;
-  }
-
-  const member = (await memberResponse.json()) as { roles: string[] };
-  return member.roles.includes(ADMIN_ROLE_ID);
 };
 
 const getAdminId = async () => {
@@ -46,10 +89,12 @@ const getAdminId = async () => {
 };
 
 const resolveServerId = async (supabase: SupabaseClient) => {
+  const selectedGuildId = await getSelectedGuildId();
+
   const { data: byDiscord } = await supabase
     .from('servers')
     .select('id')
-    .eq('discord_id', GUILD_ID)
+    .eq('discord_id', selectedGuildId)
     .maybeSingle();
 
   const discordId = (byDiscord as { id?: string } | null)?.id;
@@ -110,6 +155,7 @@ export async function POST(request: Request) {
   }
 
   const adminId = await getAdminId();
+  const selectedGuildId = await getSelectedGuildId();
   const payload = (await request.json()) as {
     code?: string;
     value?: number;
@@ -148,7 +194,7 @@ export async function POST(request: Request) {
     event: 'admin_promo_create',
     status: 'success',
     userId: adminId ?? undefined,
-    guildId: GUILD_ID,
+    guildId: selectedGuildId,
     metadata: {
       code: payload.code,
       value: payload.value,
@@ -172,6 +218,7 @@ export async function DELETE(request: Request) {
   }
 
   const adminId = await getAdminId();
+  const selectedGuildId = await getSelectedGuildId();
   const { id } = (await request.json()) as { id?: string };
   if (!id) {
     return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
@@ -186,7 +233,7 @@ export async function DELETE(request: Request) {
     event: 'admin_promo_delete',
     status: 'success',
     userId: adminId ?? undefined,
-    guildId: GUILD_ID,
+    guildId: selectedGuildId,
     metadata: { id },
   });
 

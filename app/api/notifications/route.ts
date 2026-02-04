@@ -2,6 +2,13 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
 
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || '1465698764453838882'; // Fallback to default
+};
+
+
 const getSupabase = () => {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -9,6 +16,36 @@ const getSupabase = () => {
     return null;
   }
   return createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+};
+
+const isVerifiedUser = async (supabase: any, userId: string | null) => {
+  const botToken = process.env.DISCORD_BOT_TOKEN;
+  if (!supabase || !botToken || !userId) {
+    return false;
+  }
+
+  const selectedGuildId = await getSelectedGuildId();
+  const { data: server } = await supabase
+    .from('servers')
+    .select('verify_role_id')
+    .eq('discord_id', selectedGuildId)
+    .maybeSingle();
+
+  const verifyRoleId = (server as { verify_role_id: string | null } | null)?.verify_role_id ?? null;
+  if (!verifyRoleId) {
+    return false;
+  }
+
+  const memberResponse = await fetch(`https://discord.com/api/guilds/${selectedGuildId}/members/${userId}`, {
+    headers: { Authorization: `Bot ${botToken}` },
+  });
+
+  if (!memberResponse.ok) {
+    return false;
+  }
+
+  const member = (await memberResponse.json()) as { roles: string[] };
+  return member.roles.includes(verifyRoleId);
 };
 
 export async function GET() {
@@ -19,14 +56,28 @@ export async function GET() {
 
   const cookieStore = await cookies();
   const userId = cookieStore.get('discord_user_id')?.value;
+  const selectedGuildId = await getSelectedGuildId();
+
+  if (!selectedGuildId) {
+    return NextResponse.json({ error: 'server_not_found' }, { status: 404 });
+  }
+
+  if (!(await isVerifiedUser(supabase, userId ?? null))) {
+    return NextResponse.json({ error: 'verify_required' }, { status: 403 });
+  }
+
+  // Get notifications from the last 30 days
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
   const { data, error } = await supabase
     .from('notifications')
     .select('id,title,body,type,created_at,author_name,author_avatar_url,details_url,image_url')
+    .eq('guild_id', selectedGuildId)
     .eq('status', 'published')
+    .gte('created_at', thirtyDaysAgo.toISOString())
     .or(userId ? `target_user_id.is.null,target_user_id.eq.${userId}` : 'target_user_id.is.null')
-    .order('created_at', { ascending: false })
-    .limit(20);
+    .order('created_at', { ascending: false });
 
   if (error) {
     return NextResponse.json({ error: 'fetch_failed' }, { status: 500 });
@@ -60,6 +111,10 @@ export async function POST(request: Request) {
   const userId = cookieStore.get('discord_user_id')?.value;
   if (!userId) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
+
+  if (!(await isVerifiedUser(supabase, userId))) {
+    return NextResponse.json({ error: 'verify_required' }, { status: 403 });
   }
 
   const payload = (await request.json()) as { id?: string };

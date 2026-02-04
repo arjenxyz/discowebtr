@@ -14,6 +14,8 @@ import SettingsSection from './components/SettingsSection';
 import NotificationDetailModal from './components/NotificationDetailModal';
 import NotificationsModal from './components/NotificationsModal';
 import TransferModal from './components/TransferModal';
+import PromotionsModal from './components/PromotionsModal';
+import DiscountsModal from './components/DiscountsModal';
 import type {
   MemberProfile,
   Notification,
@@ -42,7 +44,7 @@ export default function DashboardPage() {
   const [walletLoading, setWalletLoading] = useState(true);
   const [overviewStats, setOverviewStats] = useState<OverviewStats | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
-  const [activeSection, setActiveSection] = useState<'overview' | 'store' | 'transactions' | 'tracking' | 'notifications' | 'profile' | 'settings'>(
+  const [activeSection, setActiveSection] = useState<'overview' | 'store' | 'transactions' | 'tracking' | 'notifications' | 'profile' | 'settings' | 'mail'>(
     'overview',
   );
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -64,6 +66,18 @@ export default function DashboardPage() {
   const [maintenanceFlags, setMaintenanceFlags] = useState<Record<string, { is_active: boolean; reason: string | null; updated_by?: string | null }> | null>(null);
   const [maintenanceLoading, setMaintenanceLoading] = useState(true);
   const [maintenanceUpdaters, setMaintenanceUpdaters] = useState<Record<string, { id: string; name: string; avatarUrl: string }>>({});
+  const [promotionsModalOpen, setPromotionsModalOpen] = useState(false);
+  const [discountsModalOpen, setDiscountsModalOpen] = useState(false);
+  const [headerServer, setHeaderServer] = useState({
+    data: null as { id: string; name: string; iconUrl: string | null } | null,
+    loading: true,
+    guilds: [] as Array<{ id: string; name: string; iconUrl: string | null; isAdmin: boolean; isSetup: boolean }>,
+    onSelectServer: (guildId: string) => {
+      // Sunucu seçildiğinde cookie'ye kaydet ve sayfayı yenile
+      document.cookie = `selected_guild_id=${guildId}; path=/; max-age=31536000`;
+      window.location.reload();
+    },
+  });
 
   const effectiveSection = unauthorized && activeSection !== 'store' ? 'overview' : activeSection;
 
@@ -263,6 +277,52 @@ export default function DashboardPage() {
     loadOrders();
   }, []);
 
+  useEffect(() => {
+    const loadServerData = async () => {
+      setHeaderServer(prev => ({ ...prev, loading: true }));
+      try {
+        const response = await fetch('/api/discord/guilds');
+        if (response.ok) {
+          const data = (await response.json()) as { guilds: Array<{ id: string; name: string; icon: string | null }> };
+          const guilds = data.guilds.map(guild => ({
+            id: guild.id,
+            name: guild.name,
+            iconUrl: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png` : null,
+            isAdmin: false, // TODO: check admin status
+            isSetup: false, // TODO: check setup status
+          }));
+          setHeaderServer(prev => ({
+            ...prev,
+            guilds,
+            loading: false,
+          }));
+        } else {
+          setHeaderServer(prev => ({ ...prev, loading: false }));
+        }
+      } catch {
+        setHeaderServer(prev => ({ ...prev, loading: false }));
+      }
+    };
+
+    if (!unauthorized) {
+      loadServerData();
+    }
+  }, [unauthorized]);
+
+  useEffect(() => {
+    const loadSelectedServer = async () => {
+      const response = await fetch('/api/member/server-info');
+      if (response.ok) {
+        const data = (await response.json()) as { id: string; name: string; iconUrl: string | null };
+        setHeaderServer(prev => ({ ...prev, data }));
+      }
+    };
+
+    if (!unauthorized) {
+      loadSelectedServer();
+    }
+  }, [unauthorized]);
+
   const loginUrl = useMemo(() => {
     const clientId = process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID ?? '';
     const redirectUri = process.env.NEXT_PUBLIC_DISCORD_REDIRECT_URI ?? '';
@@ -409,6 +469,32 @@ export default function DashboardPage() {
     setOrdersLoading(false);
   };
 
+  const handleAddToCart = (_item: StoreItem) => {
+    // basic placeholder — log for now
+    console.log('add to cart', _item.id);
+  };
+
+  const renderNotificationBody = (body: string) => {
+    return <span dangerouslySetInnerHTML={{ __html: body }} />;
+  };
+
+  const openPromotionsModal = () => {
+    setActiveSection('settings');
+    setSettingsOpen(false);
+    setPromotionsModalOpen(true);
+  };
+
+  const openDiscountsModal = () => {
+    setActiveSection('settings');
+    setSettingsOpen(false);
+    setDiscountsModalOpen(true);
+  };
+
+  const handleApplyPromoCode = async (code: string) => {
+    setPromoCode(code);
+    await handleApplyPromo();
+  };
+
   const handlePurchase = async (itemId: string) => {
     if (isSiteMaintenance || isStoreMaintenance) {
       setTemporaryPurchaseFeedback(itemId, 'error', storeReason ?? 'Mağaza şu anda bakımdadır.');
@@ -530,6 +616,8 @@ export default function DashboardPage() {
           walletLoading={walletLoading}
           walletBalance={walletBalance}
           loginUrl={loginUrl}
+          isDeveloper={false}
+          server={headerServer}
           navigation={{
             activeSection: effectiveSection,
             onNavigate: setActiveSection,
@@ -560,6 +648,7 @@ export default function DashboardPage() {
             },
             menuRef: notificationsMenuRef,
           }}
+          renderNotificationBody={renderNotificationBody}
           settings={{
             open: settingsOpen,
             onToggle: () => setSettingsOpen((prev) => !prev),
@@ -580,6 +669,8 @@ export default function DashboardPage() {
               setTransferError(null);
               setTransferSuccess(null);
             },
+            onOpenPromotions: openPromotionsModal,
+            onOpenDiscounts: openDiscountsModal,
             logoutHref: '/api/auth/logout',
             menuRef: settingsMenuRef,
           }}
@@ -594,9 +685,11 @@ export default function DashboardPage() {
                 </p>
                 {siteUpdater && (
                   <div className="mt-3 flex items-center gap-2 text-xs text-amber-100/70">
-                    <img
+                    <Image
                       src={siteUpdater.avatarUrl}
                       alt="avatar"
+                      width={20}
+                      height={20}
                       className="h-5 w-5 rounded-full border border-amber-200/40"
                     />
                     <span>Yetkili: {siteUpdater.name}</span>
@@ -645,9 +738,11 @@ export default function DashboardPage() {
                 {storeReason ?? 'Mağaza geçici olarak bakımdadır.'}
                 {storeUpdater && (
                   <div className="mt-3 flex items-center gap-2 text-xs text-amber-100/70">
-                    <img
+                    <Image
                       src={storeUpdater.avatarUrl}
                       alt="avatar"
+                      width={20}
+                      height={20}
                       className="h-5 w-5 rounded-full border border-amber-200/40"
                     />
                     <span>Yetkili: {storeUpdater.name}</span>
@@ -662,6 +757,7 @@ export default function DashboardPage() {
                 purchaseLoadingId={purchaseLoadingId}
                 purchaseFeedback={purchaseFeedback}
                 onPurchase={handlePurchase}
+                onAddToCart={handleAddToCart}
                 renderPapelAmount={renderPapelAmount}
               />
             )}
@@ -671,9 +767,11 @@ export default function DashboardPage() {
                 {transactionsReason ?? 'İşlemler şu anda bakımdadır.'}
                 {transactionsUpdater && (
                   <div className="mt-3 flex items-center gap-2 text-xs text-amber-100/70">
-                    <img
+                    <Image
                       src={transactionsUpdater.avatarUrl}
                       alt="avatar"
+                      width={20}
+                      height={20}
                       className="h-5 w-5 rounded-full border border-amber-200/40"
                     />
                     <span>Yetkili: {transactionsUpdater.name}</span>
@@ -696,9 +794,11 @@ export default function DashboardPage() {
                 {trackingReason ?? 'Mağaza takip şu anda bakımdadır.'}
                 {trackingUpdater && (
                   <div className="mt-3 flex items-center gap-2 text-xs text-amber-100/70">
-                    <img
+                    <Image
                       src={trackingUpdater.avatarUrl}
                       alt="avatar"
+                      width={20}
+                      height={20}
                       className="h-5 w-5 rounded-full border border-amber-200/40"
                     />
                     <span>Yetkili: {trackingUpdater.name}</span>
@@ -719,9 +819,11 @@ export default function DashboardPage() {
                 {promotionsReason ?? 'Promosyon ve indirim kodları şu anda bakımdadır.'}
                 {promotionsUpdater && (
                   <div className="mt-3 flex items-center gap-2 text-xs text-amber-100/70">
-                    <img
+                    <Image
                       src={promotionsUpdater.avatarUrl}
                       alt="avatar"
+                      width={20}
+                      height={20}
                       className="h-5 w-5 rounded-full border border-amber-200/40"
                     />
                     <span>Yetkili: {promotionsUpdater.name}</span>
@@ -731,12 +833,8 @@ export default function DashboardPage() {
             )}
             {effectiveSection === 'settings' && !isSiteMaintenance && !isPromotionsMaintenance && (
               <SettingsSection
-                promoCode={promoCode}
-                promoError={promoError}
-                promoSuccess={promoSuccess}
-                promoLoading={promoLoading}
-                onPromoChange={setPromoCode}
-                onApplyPromo={handleApplyPromo}
+                onOpenPromotionsModal={openPromotionsModal}
+                onOpenDiscountsModal={openDiscountsModal}
               />
             )}
           </main>
@@ -751,10 +849,12 @@ export default function DashboardPage() {
           setActiveNotification(null);
         }}
         onOpenNotification={handleOpenNotification}
+        renderNotificationBody={renderNotificationBody}
       />
       <NotificationDetailModal
         notification={activeNotification}
         onClose={() => setActiveNotification(null)}
+        renderNotificationBody={renderNotificationBody}
       />
       <TransferModal
         open={transferModalOpen}
@@ -771,6 +871,32 @@ export default function DashboardPage() {
           setTransferSuccess(null);
         }}
         onSubmit={handleTransfer}
+      />
+      <PromotionsModal
+        isOpen={promotionsModalOpen}
+        onClose={() => setPromotionsModalOpen(false)}
+        onApply={handleApplyPromoCode}
+        loading={promoLoading}
+        error={promoError}
+        success={promoSuccess}
+      />
+
+      <DiscountsModal
+        isOpen={discountsModalOpen}
+        onClose={() => setDiscountsModalOpen(false)}
+        onApply={async (code: string) => {
+          // minimal handler: attempt to post and close
+          try {
+            await fetch('/api/discount/validate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ code }),
+            });
+          } catch {
+            // ignore
+          }
+          setDiscountsModalOpen(false);
+        }}
       />
     </div>
   );

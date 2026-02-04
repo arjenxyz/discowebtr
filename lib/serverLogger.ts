@@ -1,5 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────────────────────────────────────
+
 type LogPayload = {
   event: string;
   status?: string;
@@ -14,16 +18,56 @@ type WebhookTarget = {
   url: string;
 };
 
-type LogChannelKey =
+type UserLogChannelKey =
+  | 'user_main'
+  | 'user_auth'
+  | 'user_roles'
+  | 'user_exchange'
+  | 'user_store';
+
+type AdminLogChannelKey =
+  | 'admin_main'
+  | 'admin_wallet'
+  | 'admin_store'
+  | 'admin_notifications'
+  | 'admin_settings';
+
+type LogChannelKey = UserLogChannelKey | AdminLogChannelKey;
+
+type LegacyLogChannelKey =
   | 'main'
   | 'auth'
   | 'roles'
-  | 'system'
   | 'suspicious'
   | 'store'
   | 'wallet'
   | 'notifications'
-  | 'settings';
+  | 'settings'
+  | 'admin'
+  | 'system';
+
+type EmbedField = { name: string; value: string; inline?: boolean };
+
+type DiscordEmbed = {
+  author?: { name: string; icon_url?: string };
+  title?: string;
+  url?: string;
+  description?: string;
+  color?: number;
+  fields?: EmbedField[];
+  footer?: { text: string; icon_url?: string };
+  timestamp?: string;
+};
+
+type LogChannelConfigRow = {
+  channel_type: LogChannelKey | LegacyLogChannelKey | string;
+  webhook_url: string;
+  is_active: boolean;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUPABASE
+// ─────────────────────────────────────────────────────────────────────────────
 
 const getServerSupabase = () => {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -38,6 +82,10 @@ const getServerSupabase = () => {
   });
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// REQUEST HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
 const getRequestIp = (request: Request) => {
   const forwarded = request.headers.get('x-forwarded-for');
   if (forwarded) {
@@ -46,58 +94,9 @@ const getRequestIp = (request: Request) => {
   return request.headers.get('x-real-ip') ?? null;
 };
 
-const getEnvWebhookTargets = (): Partial<Record<LogChannelKey, WebhookTarget>> => {
-  const mainUrl = process.env.DISCORD_LOG_WEBHOOK_MAIN;
-  const authUrl = process.env.DISCORD_LOG_WEBHOOK_AUTH;
-  const rolesUrl = process.env.DISCORD_LOG_WEBHOOK_ROLES;
-  const systemUrl = process.env.DISCORD_LOG_WEBHOOK_SYSTEM;
-  const suspiciousUrl = process.env.DISCORD_LOG_WEBHOOK_SUSPICIOUS;
-  const storeUrl = process.env.DISCORD_LOG_WEBHOOK_STORE;
-  const walletUrl = process.env.DISCORD_LOG_WEBHOOK_WALLET;
-  const notificationsUrl = process.env.DISCORD_LOG_WEBHOOK_NOTIFICATIONS;
-  const settingsUrl = process.env.DISCORD_LOG_WEBHOOK_SETTINGS;
-
-  return {
-    main: mainUrl ? { name: 'main', url: mainUrl } : undefined,
-    auth: authUrl ? { name: 'auth', url: authUrl } : undefined,
-    roles: rolesUrl ? { name: 'roles', url: rolesUrl } : undefined,
-    system: systemUrl ? { name: 'system', url: systemUrl } : undefined,
-    suspicious: suspiciousUrl ? { name: 'suspicious', url: suspiciousUrl } : undefined,
-    store: storeUrl ? { name: 'store', url: storeUrl } : undefined,
-    wallet: walletUrl ? { name: 'wallet', url: walletUrl } : undefined,
-    notifications: notificationsUrl ? { name: 'notifications', url: notificationsUrl } : undefined,
-    settings: settingsUrl ? { name: 'settings', url: settingsUrl } : undefined,
-  };
-};
-
-const resolveEventChannel = (payload: LogPayload): LogChannelKey => {
-  const event = payload.event.toLowerCase();
-  if (event.startsWith('admin_store') || event.startsWith('admin_promo') || event.startsWith('admin_order')) {
-    return 'store';
-  }
-  if (event.startsWith('admin_wallet')) {
-    return 'wallet';
-  }
-  if (event.startsWith('admin_notification')) {
-    return 'notifications';
-  }
-  if (event.startsWith('admin_settings') || event.startsWith('admin_log_channels')) {
-    return 'settings';
-  }
-  if (event.includes('exchange') || event.includes('role_check')) {
-    return 'auth';
-  }
-  if (event.includes('role_assign') || event.includes('role_assigned')) {
-    return 'roles';
-  }
-  return 'system';
-};
-
-type LogChannelConfigRow = {
-  channel_type: LogChannelKey;
-  webhook_url: string;
-  is_active: boolean;
-};
+// ─────────────────────────────────────────────────────────────────────────────
+// WEBHOOK TARGETS — DB ONLY
+// ─────────────────────────────────────────────────────────────────────────────
 
 const getDbWebhookTargets = async (
   supabase: unknown,
@@ -121,274 +120,468 @@ const getDbWebhookTargets = async (
 
   return (data as LogChannelConfigRow[]).reduce<Partial<Record<LogChannelKey, WebhookTarget>>>(
     (acc, row) => {
-      acc[row.channel_type] = { name: row.channel_type, url: row.webhook_url };
+      const normalized = normalizeChannelKey(row.channel_type);
+      if (normalized) {
+        acc[normalized] = { name: normalized, url: row.webhook_url };
+      }
       return acc;
     },
     {},
   );
 };
 
-const isSuspiciousEvent = (payload: LogPayload) => {
+// ─────────────────────────────────────────────────────────────────────────────
+// CHANNEL RESOLVER
+// ─────────────────────────────────────────────────────────────────────────────
+
+const isSuspiciousEvent = (payload: LogPayload): boolean => {
   const status = payload.status?.toLowerCase() ?? '';
-  const event = payload.event.toLowerCase();
+  const event  = payload.event.toLowerCase();
   return (
-    status.includes('failed') ||
-    status.includes('missing') ||
+    status.includes('failed')       ||
+    status.includes('missing')      ||
     status.includes('unauthorized') ||
-    status.includes('error') ||
-    event.includes('failed') ||
+    status.includes('error')        ||
+    event.includes('failed')        ||
     event.includes('unauthorized')
   );
 };
 
+const resolveEventChannel = (payload: LogPayload): LogChannelKey => {
+  const event = payload.event.toLowerCase();
+  const isAdminEvent = event.startsWith('admin_');
+
+  if (isSuspiciousEvent(payload)) return isAdminEvent ? 'admin_main' : 'user_main';
+
+  if (isAdminEvent) {
+    if (event.startsWith('admin_wallet'))       return 'admin_wallet';
+    if (event.startsWith('admin_notification')) return 'admin_notifications';
+    if (event.startsWith('admin_settings') || event.startsWith('admin_log_channels')) return 'admin_settings';
+    if (
+      event.startsWith('admin_store')    ||
+      event.startsWith('admin_promo')    ||
+      event.startsWith('admin_order')    ||
+      event.startsWith('admin_discount')
+    ) return 'admin_store';
+    return 'admin_main';
+  }
+
+  if (event.startsWith('store_')) return 'user_store';
+  if (event.includes('exchange')) return 'user_exchange';
+  if (event.includes('role_check') || event.includes('role_assign') || event.includes('role_assigned')) return 'user_roles';
+  if (event.includes('auth') || event.includes('login') || event.includes('verify') || event.includes('callback')) return 'user_auth';
+
+  return 'user_main';
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMBED — COLOR PALETTE
+// ─────────────────────────────────────────────────────────────────────────────
+
+const COLORS: Record<LogChannelKey, number> = {
+  user_main:          0x5dade2, // Light blue
+  user_auth:          0x1abc9c, // Teal
+  user_roles:         0x9b59b6, // Purple
+  user_exchange:      0x3498db, // Blue
+  user_store:         0x2ecc71, // Green
+  admin_main:         0xe67e22, // Orange
+  admin_wallet:       0xf39c12, // Gold
+  admin_store:        0x27ae60, // Dark green
+  admin_notifications: 0x2980b9, // Dark blue
+  admin_settings:     0x95a5a6, // Grey
+};
+
+const resolveColor = (payload: LogPayload): number => {
+  const channel = resolveEventChannel(payload);
+  if (isSuspiciousEvent(payload)) {
+    return channel.startsWith('admin_') ? COLORS.admin_main : COLORS.user_main;
+  }
+  return COLORS[channel] ?? COLORS.user_main;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMBED — UTILITY HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const getMetadataString = (metadata: Record<string, unknown>, key: string): string | null => {
+  const value = metadata[key];
+  return value === undefined || value === null || value === '' ? null : String(value);
+};
+
 const formatUser = (userId?: string) => (userId ? `<@${userId}>` : '—');
 const formatRole = (roleId?: string) => (roleId ? `<@&${roleId}>` : '—');
-const formatNumber = (value: unknown) =>
-  typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2).replace(/\.00$/, '') : '—';
-const formatDate = (value: unknown) => {
-  if (!value) {
-    return '—';
-  }
-  if (typeof value === 'string' || value instanceof Date) {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
-  }
-  return String(value);
-};
-const formatText = (value: unknown) => (value === undefined || value === null || value === '' ? '—' : String(value));
 
-type EmbedField = { name: string; value: string; inline?: boolean };
+const formatNumber = (value: unknown): string =>
+  typeof value === 'number' && Number.isFinite(value)
+    ? value.toFixed(2).replace(/\.00$/, '')
+    : String(value ?? '0');
 
-const buildEmbedContent = (payload: LogPayload, request: Request) => {
-  const metadata = payload.metadata ?? {};
-  const ip = getRequestIp(request);
-  const baseFields: EmbedField[] = [];
+/** Discord native absolute time: "1 Şubat 2026, 14:32" */
+const discordAbsoluteTime = (date: Date = new Date()) =>
+  `<t:${Math.floor(date.getTime() / 1000)}:f>`;
 
-  if (payload.status) {
-    baseFields.push({ name: 'Durum', value: payload.status, inline: true });
-  }
-  if (payload.userId) {
-    baseFields.push({ name: 'Yetkili', value: formatUser(payload.userId), inline: true });
-  }
-  if (payload.guildId) {
-    baseFields.push({ name: 'Guild', value: payload.guildId, inline: true });
-  }
-  if (payload.roleId) {
-    baseFields.push({ name: 'Rol', value: formatRole(payload.roleId), inline: true });
-  }
-  if (isSuspiciousEvent(payload) && ip) {
-    baseFields.push({ name: 'IP', value: ip, inline: true });
-  }
-
-  const event = payload.event;
-  switch (event) {
-    case 'admin_store_item_create':
-      return {
-        title: '🛒 Mağaza ürünü oluşturuldu',
-        description: metadata.title ? `**${formatText(metadata.title)}**` : undefined,
-        fields: [
-          ...baseFields,
-          { name: 'Fiyat', value: formatNumber(metadata.price), inline: true },
-          { name: 'Süre (gün)', value: formatText(metadata.durationDays), inline: true },
-          { name: 'Durum', value: formatText(metadata.status), inline: true },
-        ],
-      };
-    case 'admin_store_item_update':
-      return {
-        title: '🛠️ Mağaza ürünü güncellendi',
-        description: metadata.title ? `**${formatText(metadata.title)}**` : undefined,
-        fields: [
-          ...baseFields,
-          { name: 'Ürün ID', value: formatText(metadata.id), inline: true },
-          { name: 'Fiyat', value: formatNumber(metadata.price), inline: true },
-          { name: 'Süre (gün)', value: formatText(metadata.durationDays), inline: true },
-          { name: 'Durum', value: formatText(metadata.status), inline: true },
-        ],
-      };
-    case 'admin_store_item_delete':
-      return {
-        title: '🗑️ Mağaza ürünü silindi',
-        fields: [...baseFields, { name: 'Ürün ID', value: formatText(metadata.id), inline: true }],
-      };
-    case 'admin_promo_create':
-      return {
-        title: '🎁 Promosyon oluşturuldu',
-        description: metadata.code ? `**${formatText(metadata.code)}**` : undefined,
-        fields: [
-          ...baseFields,
-          { name: 'Değer', value: formatNumber(metadata.value), inline: true },
-          { name: 'Maks. kullanım', value: formatText(metadata.maxUses ?? 'sınırsız'), inline: true },
-          { name: 'Durum', value: formatText(metadata.status), inline: true },
-          { name: 'Bitiş', value: formatDate(metadata.expiresAt), inline: true },
-        ],
-      };
-    case 'admin_promo_delete':
-      return {
-        title: '🧹 Promosyon silindi',
-        fields: [...baseFields, { name: 'Promosyon ID', value: formatText(metadata.id), inline: true }],
-      };
-    case 'admin_store_order_approve':
-      return {
-        title: '✅ Sipariş onaylandı',
-        fields: [
-          ...baseFields,
-          { name: 'Sipariş ID', value: formatText(metadata.orderId), inline: true },
-          { name: 'Üye', value: formatUser(formatText(metadata.targetUserId)), inline: true },
-          { name: 'Tutar', value: formatNumber(metadata.amount), inline: true },
-        ],
-      };
-    case 'admin_store_order_reject':
-      return {
-        title: '❌ Sipariş reddedildi',
-        fields: [
-          ...baseFields,
-          { name: 'Sipariş ID', value: formatText(metadata.orderId), inline: true },
-          { name: 'Üye', value: formatUser(formatText(metadata.targetUserId)), inline: true },
-          { name: 'Tutar', value: formatNumber(metadata.amount), inline: true },
-          { name: 'Sebep', value: formatText(metadata.reason), inline: false },
-        ],
-      };
-    case 'admin_wallet_adjust':
-      return {
-        title: '💳 Cüzdan düzenlendi',
-        fields: [
-          ...baseFields,
-          { name: 'Kapsam', value: formatText(metadata.scope), inline: true },
-          { name: 'İşlem', value: formatText(metadata.mode), inline: true },
-          { name: 'Tutar', value: formatNumber(metadata.amount), inline: true },
-          metadata.targetUserId
-            ? { name: 'Üye', value: formatUser(formatText(metadata.targetUserId)), inline: true }
-            : null,
-          metadata.updatedCount
-            ? { name: 'Güncellenen', value: formatText(metadata.updatedCount), inline: true }
-            : null,
-          metadata.message ? { name: 'Mesaj', value: formatText(metadata.message), inline: false } : null,
-        ].filter(Boolean) as EmbedField[],
-      };
-    case 'admin_notification_create':
-      return {
-        title: '📣 Bildirim oluşturuldu',
-        description: metadata.title ? `**${formatText(metadata.title)}**` : undefined,
-        fields: [
-          ...baseFields,
-          { name: 'Tür', value: formatText(metadata.type), inline: true },
-          { name: 'Durum', value: formatText(metadata.status), inline: true },
-          metadata.targetUserId
-            ? { name: 'Hedef Üye', value: formatUser(formatText(metadata.targetUserId)), inline: true }
-            : null,
-          metadata.detailsUrl ? { name: 'Detay', value: formatText(metadata.detailsUrl), inline: false } : null,
-        ].filter(Boolean) as EmbedField[],
-      };
-    case 'admin_notification_delete':
-      return {
-        title: '🗑️ Bildirim silindi',
-        fields: [...baseFields, { name: 'Bildirim ID', value: formatText(metadata.id), inline: true }],
-      };
-    case 'admin_settings_update':
-      return {
-        title: '⚙️ Ayarlar güncellendi',
-        fields: [
-          ...baseFields,
-          { name: 'Onay eşiği', value: formatText(metadata.approval_threshold), inline: true },
-        ],
-      };
-    case 'admin_log_channels_update': {
-      const updated = Array.isArray(metadata.updated) ? (metadata.updated as Array<Record<string, unknown>>) : [];
-      const activeCount = updated.filter((item) => item.is_active === true).length;
-      return {
-        title: '🧩 Log kanalları güncellendi',
-        fields: [
-          ...baseFields,
-          { name: 'Güncellenen kanal', value: `${updated.length}`, inline: true },
-          { name: 'Aktif kanal', value: `${activeCount}`, inline: true },
-        ],
-      };
-    }
-    default: {
-      const fields = [...baseFields];
-      if (metadata && Object.keys(metadata).length > 0) {
-        const metadataString = JSON.stringify(metadata, null, 2);
-        fields.push({
-          name: 'Metadata',
-          value: metadataString.length > 1000 ? `${metadataString.slice(0, 1000)}…` : metadataString,
-          inline: false,
-        });
-      }
-      return {
-        title: payload.event.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
-        fields,
-      };
-    }
+const normalizeChannelKey = (value: string): LogChannelKey | null => {
+  switch (value) {
+    case 'user_main':
+    case 'user_auth':
+    case 'user_roles':
+    case 'user_exchange':
+    case 'user_store':
+    case 'admin_main':
+    case 'admin_wallet':
+    case 'admin_store':
+    case 'admin_notifications':
+    case 'admin_settings':
+      return value;
+    case 'main':
+      return 'user_main';
+    case 'auth':
+      return 'user_auth';
+    case 'roles':
+      return 'user_roles';
+    case 'store':
+      return 'user_store';
+    case 'wallet':
+      return 'admin_wallet';
+    case 'notifications':
+      return 'admin_notifications';
+    case 'settings':
+      return 'admin_settings';
+    case 'admin':
+      return 'admin_main';
+    case 'system':
+    case 'suspicious':
+      return 'admin_main';
+    default:
+      return null;
   }
 };
 
-const sendDiscordWebhook = async (target: WebhookTarget, payload: LogPayload, request: Request) => {
-  const timestamp = new Date().toISOString();
-  const { title, description, fields } = buildEmbedContent(payload, request);
+const humanizeEvent = (event: string) =>
+  event.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMBED — AUTHOR
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+const CHANNEL_LABELS: Record<LogChannelKey, string> = {
+  user_main:          'Üye • Genel',
+  user_auth:          'Üye • Kimlik',
+  user_roles:         'Üye • Roller',
+  user_exchange:      'Üye • Değişim',
+  user_store:         'Üye • Mağaza',
+  admin_main:         'Admin • Genel',
+  admin_wallet:       'Admin • Cüzdan',
+  admin_store:        'Admin • Mağaza',
+  admin_notifications:'Admin • Bildirim',
+  admin_settings:     'Admin • Ayarlar',
+};
+
+const buildAuthor = (channelType: LogChannelKey) => ({
+  name: CHANNEL_LABELS[channelType],
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMBED — TITLE
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMBED — DESCRIPTION (özet cümle)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const resolveActorDisplay = (payload: LogPayload): string => {
+  const meta = payload.metadata ?? {};
+  const name =
+    getMetadataString(meta, 'actorName') ||
+    getMetadataString(meta, 'adminName') ||
+    getMetadataString(meta, 'userName')  ||
+    getMetadataString(meta, 'username');
+  return name || (payload.userId ? formatUser(payload.userId) : 'Bilinmiyor');
+};
+
+const resolveActorAvatarUrl = (payload: LogPayload): string | null => {
+  const meta = payload.metadata ?? {};
+  return (
+    getMetadataString(meta, 'actorAvatarUrl') ||
+    getMetadataString(meta, 'avatarUrl') ||
+    null
+  );
+};
+
+const resolveTargetDisplay = (payload: LogPayload): string | null => {
+  const meta = payload.metadata ?? {};
+  const name =
+    getMetadataString(meta, 'targetUserName') ||
+    getMetadataString(meta, 'targetUsername');
+  const id = getMetadataString(meta, 'targetUserId');
+  return name || (id ? formatUser(id) : null);
+};
+
+
+const buildDescription = (payload: LogPayload): string => {
+  const user   = resolveActorDisplay(payload);
+  const meta   = payload.metadata ?? {};
+  const role   = payload.roleId ? formatRole(payload.roleId) : null;
+  const amount = meta.amount ?? meta.price ?? meta.value;
+  const now    = new Date();
+  const event  = payload.event.toLowerCase();
+
+  if (payload.event === 'store_purchase' && role && amount !== undefined && amount !== null) {
+    return `**${user}**, ${discordAbsoluteTime(now)} tarihinde **${formatNumber(amount)} <a:papel:1467470043850735739>** karşılığında **${role}** rolünü edindi.`;
+  }
+
+  if (payload.event === 'admin_wallet_adjust') {
+    const target = resolveTargetDisplay(payload);
+    const scope  = getMetadataString(meta, 'scope') || 'user';
+    const mode   = getMetadataString(meta, 'mode') ?? '—';
+    const updated = getMetadataString(meta, 'updatedCount');
+    const note   = getMetadataString(meta, 'message');
+
+    return [
+      `**Cüzdan işlemi** · ${discordAbsoluteTime(now)}`,
+      `Yetkili: **${user}**${payload.userId ? ` (${formatUser(payload.userId)} · ${payload.userId})` : ''}`,
+      `İşlem: **${mode}**`,
+      `Tutar: **${formatNumber(amount ?? 0)} <a:papel:1467470043850735739>**`,
+      scope === 'all'
+        ? `Kapsam: **Tüm üyeler**${updated ? ` (${updated} kişi)` : ''}`
+        : `Kapsam: **Tek üye**${target ? ` — ${target}` : ''}`,
+      note ? `Not: ${note}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  if (event.startsWith('admin_')) {
+    const target = resolveTargetDisplay(payload);
+    const action = humanizeEvent(payload.event);
+    const details: string[] = [];
+    const code = getMetadataString(meta, 'code');
+    const percent = getMetadataString(meta, 'percent');
+    const maxUses = getMetadataString(meta, 'maxUses');
+    const expiresAt = getMetadataString(meta, 'expiresAt');
+
+    if (target) details.push(`Hedef ${target}`);
+    if (role) details.push(`Rol ${role}`);
+    if (amount !== undefined && amount !== null) {
+      details.push(`Tutar ${formatNumber(amount)} <a:papel:1467470043850735739>`);
+    }
+    if (percent) details.push(`İndirim ${formatNumber(percent)}%`);
+    if (code) details.push(`Kod ${code}`);
+    if (maxUses) details.push(`Limit ${maxUses}`);
+    if (expiresAt) {
+      const parsed = Date.parse(expiresAt);
+      details.push(
+        Number.isNaN(parsed)
+          ? `Bitiş ${expiresAt}`
+          : `Bitiş ${discordAbsoluteTime(new Date(parsed))}`,
+      );
+    }
+    const title = getMetadataString(meta, 'title');
+    const orderId = getMetadataString(meta, 'orderId');
+    const itemId = getMetadataString(meta, 'itemId');
+    const mode = getMetadataString(meta, 'mode');
+    const scope = getMetadataString(meta, 'scope');
+    const updated = getMetadataString(meta, 'updatedCount');
+    const note = getMetadataString(meta, 'message');
+
+    if (title) details.push(`Ürün "${title}"`);
+    if (orderId) details.push(`Sipariş ${orderId}`);
+    if (itemId) details.push(`Ürün ID ${itemId}`);
+    if (mode) details.push(`İşlem ${mode}`);
+    if (scope) {
+      details.push(
+        scope === 'all'
+          ? `Kapsam tüm üyeler${updated ? ` (${updated})` : ''}`
+          : 'Kapsam tek üye',
+      );
+    }
+
+    const detailText = details.length ? ` — ${details.join(', ')}` : '';
+    return [
+      `**Admin işlem kaydı** · ${discordAbsoluteTime(now)}`,
+      `Yetkili: **${user}**${payload.userId ? ` (${formatUser(payload.userId)} · ${payload.userId})` : ''}`,
+      `İşlem: **${action}**${detailText}`,
+      note ? `Not: ${note}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  const details: string[] = [];
+  const target = resolveTargetDisplay(payload);
+  const title  = getMetadataString(meta, 'title');
+  const orderId = getMetadataString(meta, 'orderId');
+  const itemId  = getMetadataString(meta, 'itemId');
+  const mode    = getMetadataString(meta, 'mode');
+  const scope   = getMetadataString(meta, 'scope');
+  const updated = getMetadataString(meta, 'updatedCount');
+
+  if (target) details.push(`Hedef ${target}`);
+  if (role) details.push(`Rol ${role}`);
+  if (amount !== undefined && amount !== null) {
+    details.push(`Tutar ${formatNumber(amount)} <a:papel:1467470043850735739>`);
+  }
+  if (title) details.push(`Ürün "${title}"`);
+  if (orderId) details.push(`Sipariş ${orderId}`);
+  if (itemId) details.push(`Ürün ID ${itemId}`);
+  if (mode) details.push(`İşlem ${mode}`);
+  if (scope) {
+    details.push(
+      scope === 'all'
+        ? `Kapsam tüm üyeler${updated ? ` (${updated})` : ''}`
+        : 'Kapsam tek üye',
+    );
+  }
+
+  const detailText = details.length ? ` — ${details.join(', ')}` : '';
+  return `**${user}**, ${discordAbsoluteTime(now)} · ${humanizeEvent(payload.event)}${detailText}.`;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMBED — FIELDS
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMBED — FOOTER
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMBED — MASTER BUILDER
+// ─────────────────────────────────────────────────────────────────────────────
+
+const buildEmbedPayload = (payload: LogPayload): DiscordEmbed => {
+  const channelType = resolveEventChannel(payload);
+  const actorAvatarUrl = resolveActorAvatarUrl(payload);
+  const actorDisplay   = resolveActorDisplay(payload);
+  const author = payload.event === 'admin_wallet_adjust'
+    ? { name: `Yetkili: ${actorDisplay}`, icon_url: actorAvatarUrl ?? undefined }
+    : buildAuthor(channelType);
+
+  return {
+    author,
+    description: buildDescription(payload),
+    color:       resolveColor(payload),
+    timestamp:   new Date().toISOString(),
+  };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DISCORD WEBHOOK SENDER
+// ─────────────────────────────────────────────────────────────────────────────
+
+const sendDiscordWebhook = async (target: WebhookTarget, payload: LogPayload) => {
+  const embed = buildEmbedPayload(payload);
 
   await fetch(target.url, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username: 'Disc Nexus Logs',
-      allowed_mentions: { parse: [] },
-      embeds: [
-        {
-          title,
-          color: isSuspiciousEvent(payload) ? 15158332 : 5793266,
-          description,
-          fields,
-          footer: { text: `Event: ${payload.event}` },
-          timestamp,
-        },
-      ],
+    body:    JSON.stringify({
+      username:          '📖 Veri Merkezi',
+      allowed_mentions:  { parse: [] },
+      embeds:            [embed],
     }),
   });
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN EXPORT — logWebEvent
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const logWebEvent = async (request: Request, payload: LogPayload) => {
   try {
-    const supabase = getServerSupabase();
+    console.log('🔥 logWebEvent called:', payload.event, 'guildId:', payload.guildId);
+
+    const supabase  = getServerSupabase();
+
+    // ── 1. Audit log → Supabase ──
     if (supabase) {
       await supabase.from('web_audit_logs').insert({
-        event: payload.event,
-        status: payload.status,
-        user_id: payload.userId ?? null,
-        guild_id: payload.guildId ?? null,
-        role_id: payload.roleId ?? null,
+        event:      payload.event,
+        status:     payload.status,
+        user_id:    payload.userId   ?? null,
+        guild_id:   payload.guildId   ?? null,
+        role_id:    payload.roleId    ?? null,
         ip_address: getRequestIp(request),
         user_agent: request.headers.get('user-agent'),
-        metadata: payload.metadata ?? {},
+        metadata:   payload.metadata  ?? {},
       });
     }
 
-    const guildId = process.env.DISCORD_GUILD_ID;
-    const envTargets = getEnvWebhookTargets();
-    const dbTargets = await getDbWebhookTargets(supabase, guildId);
-    const targets: Partial<Record<LogChannelKey, WebhookTarget>> = {
-      ...envTargets,
-      ...dbTargets,
-    };
-    const deliveries: Promise<void>[] = [];
+    // ── 2. Discord embed yaz ──
+    const botApiUrl   = process.env.BOT_API_URL || 'http://localhost:3000';
     const channelType = resolveEventChannel(payload);
-    const isSuspicious = isSuspiciousEvent(payload);
+    const embed       = buildEmbedPayload(payload);
 
-    const preferredChannel: LogChannelKey | null = isSuspicious
-      ? 'suspicious'
-      : targets[channelType]
-        ? channelType
-        : targets.main
-          ? 'main'
-          : null;
+    console.log('🤖 Sending to bot API:', botApiUrl, 'channelType:', channelType);
 
-    if (preferredChannel && targets[preferredChannel]) {
-      deliveries.push(sendDiscordWebhook(targets[preferredChannel]!, payload, request));
+    // ── 3. Webhook fallback (DB → vazgeç) ──
+    const sendWebhookFallback = async () => {
+      if (!supabase || !payload.guildId) return;
+
+      const dbTargets = await getDbWebhookTargets(supabase, payload.guildId);
+      const target    = dbTargets[channelType] ?? dbTargets.user_main ?? dbTargets.admin_main;
+
+      if (!target) {
+        console.warn('📡 No webhook target found for channelType:', channelType, 'guildId:', payload.guildId);
+        return;
+      }
+
+      await sendDiscordWebhook(target, payload);
+      console.log('📡 Webhook fallback sent for channelType:', channelType, 'guildId:', payload.guildId);
+    };
+
+    // ── 4. Bot API'sine gönder (varsa), yoksa fallback ──
+    if (payload.guildId) {
+      console.log('📡 Fetching bot API for guild:', payload.guildId, 'channelType:', channelType);
+
+      try {
+        const controller = new AbortController();
+        const timeoutId  = setTimeout(() => controller.abort(), 5000);
+
+        const response = await fetch(`${botApiUrl}/api/log`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ guildId: payload.guildId, channelType, embed }),
+          signal:  controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        console.log('📡 Bot API response status:', response.status, 'ok:', response.ok);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('📡 Bot API error response:', errorText);
+          await sendWebhookFallback();
+        } else {
+          const successText = await response.text();
+          console.log('📡 Bot API success response:', successText);
+        }
+      } catch (fetchError) {
+        const error = fetchError instanceof Error ? fetchError : new Error('Unknown error');
+        console.error('📡 Fetch to bot API failed:', error.message, 'botApiUrl:', botApiUrl);
+
+        if (error.name === 'AbortError') {
+          console.error('📡 Bot API request timed out');
+        }
+
+        await sendWebhookFallback();
+      }
     }
 
-    if (deliveries.length > 0) {
-      await Promise.allSettled(deliveries);
-    }
   } catch {
-    // Logları uygulama akışını bozmasın diye yutuyoruz.
+    // Loglar uygulama akışını bozmasın diye yutulur.
   }
 };

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { LuLoader } from 'react-icons/lu';
 
 // 1. Mantığı yürüten ana içeriği ayrı bir fonksiyon (component) haline getiriyoruz.
 function DiscordAuthCallbackContent() {
@@ -44,18 +45,60 @@ function DiscordAuthCallbackContent() {
         }
 
         const payload = (await response.json()) as {
-          status: 'ok' | 'needs_rules' | 'error';
+          status: 'ok' | 'needs_rules' | 'no_guilds' | 'error';
           isAdmin?: boolean;
+          adminGuilds?: Array<{ id: string; name: string; isAdmin: boolean; isSetup: boolean; verifyRoleId: string | null; isOwner?: boolean }>;
+          user?: { id: string; username: string; avatar: string | null; discriminator: string };
         };
 
         if (payload.status === 'needs_rules') {
+          // Sunucu bilgilerini localStorage'a kaydet (rules sayfasında kullanılacak)
+          if (payload.adminGuilds) {
+            localStorage.setItem('adminGuilds', JSON.stringify(payload.adminGuilds));
+            localStorage.setItem('adminGuildsUpdatedAt', new Date().toISOString());
+          }
+          // Kullanıcı bilgilerini localStorage'a kaydet
+          if (payload.user) {
+            localStorage.setItem('discordUser', JSON.stringify(payload.user));
+          }
           router.replace('/auth/rules');
+          return;
+        }
+
+        if (payload.status === 'no_guilds') {
+          setStatus('Botumuzun bulunduğu bir sunucu bulunamadı. Yönlendiriliyor...');
+          // Kullanıcı bilgilerini localStorage'a kaydet
+          if (payload.user) {
+            localStorage.setItem('discordUser', JSON.stringify(payload.user));
+          }
+          setTimeout(() => router.replace('/auth/bot-invite'), 1200);
           return;
         }
 
         if (payload.status === 'ok') {
           setStatus('Rol sorgulanıyor... başarılı. Yönlendiriliyor...');
-          setTimeout(() => router.replace(payload.isAdmin ? '/admin' : '/dashboard'), 1200);
+          
+          console.log('OAuth payload:', payload); // Debug log
+          
+          // Kullanıcı bilgilerini localStorage'a kaydet
+          if (payload.user) {
+            localStorage.setItem('discordUser', JSON.stringify(payload.user));
+          }
+          
+          // Tüm erişilebilir sunucuları say (setup olup olmamasına bakmadan)
+          const totalGuilds = payload.adminGuilds?.length || 0;
+          
+          // Her zaman sunucu seçtirmeye git (eğer erişilebilir sunucu varsa)
+          if (totalGuilds > 0) {
+            // Sunucu bilgilerini localStorage'a kaydet
+            localStorage.setItem('adminGuilds', JSON.stringify(payload.adminGuilds));
+            localStorage.setItem('adminGuildsUpdatedAt', new Date().toISOString());
+            setTimeout(() => router.replace('/auth/select-server'), 1200);
+            return;
+          }
+          
+          // Hiç erişilebilir sunucu yoksa dashboard'a git
+          setTimeout(() => router.replace('/dashboard'), 1200);
           return;
         }
 
@@ -70,7 +113,10 @@ function DiscordAuthCallbackContent() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0b0d12] text-white">
-      <p className="text-sm text-white/70">{status}</p>
+      <div className="text-center">
+        <LuLoader className="mx-auto mb-4 h-8 w-8 animate-spin text-blue-500" />
+        <p className="text-sm text-white/70">{status}</p>
+      </div>
     </div>
   );
 }
@@ -81,8 +127,11 @@ export default function DiscordAuthCallbackPage() {
     <div className="bg-[#0b0d12]">
       <Suspense
         fallback={
-          <div className="flex min-h-screen items-center justify-center text-white">
-            <p className="text-sm text-white/70">Yükleniyor...</p>
+          <div className="flex min-h-screen items-center justify-center bg-[#0b0d12] text-white">
+            <div className="text-center">
+              <LuLoader className="mx-auto mb-4 h-8 w-8 animate-spin text-blue-500" />
+              <p className="text-sm text-white/70">Yükleniyor...</p>
+            </div>
           </div>
         }
       >

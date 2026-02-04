@@ -8,6 +8,7 @@ type StoreSectionProps = {
   purchaseLoadingId: string | null;
   purchaseFeedback: PurchaseFeedback;
   onPurchase: (itemId: string) => void;
+  onAddToCart: (item: StoreItem) => void;
   renderPapelAmount: (value: number) => React.ReactNode;
 };
 
@@ -17,10 +18,11 @@ export default function StoreSection({
   purchaseLoadingId,
   purchaseFeedback,
   onPurchase,
+  onAddToCart,
   renderPapelAmount,
 }: StoreSectionProps) {
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+    <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Mağaza</h2>
       </div>
@@ -46,22 +48,32 @@ export default function StoreSection({
                       <span className="rounded-full border border-white/10 px-2 py-1">Rol: {item.role_id}</span>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => onPurchase(item.id)}
-                    disabled={purchaseLoadingId === item.id}
-                    className={`mt-3 w-full rounded-xl px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                      purchaseFeedback[item.id]?.status === 'success'
-                        ? 'bg-emerald-500 hover:bg-emerald-400'
-                        : purchaseFeedback[item.id]?.status === 'error'
-                          ? 'bg-rose-500 hover:bg-rose-400'
-                          : 'bg-indigo-500 hover:bg-indigo-400'
-                    }`}
-                  >
-                    {purchaseLoadingId === item.id
-                      ? 'İşleniyor...'
-                      : purchaseFeedback[item.id]?.message ?? 'Satın Al'}
-                  </button>
+
+                  <div className="mt-3 grid gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onAddToCart(item)}
+                      className="w-full rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/5"
+                    >
+                      Sepete Ekle
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onPurchase(item.id)}
+                      disabled={purchaseLoadingId === item.id}
+                      className={`w-full rounded-xl px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                        purchaseFeedback[item.id]?.status === 'success'
+                          ? 'bg-emerald-500 hover:bg-emerald-400'
+                          : purchaseFeedback[item.id]?.status === 'error'
+                            ? 'bg-rose-500 hover:bg-rose-400'
+                            : 'bg-indigo-500 hover:bg-indigo-400'
+                      }`}
+                    >
+                      {purchaseLoadingId === item.id
+                        ? 'İşleniyor...'
+                        : purchaseFeedback[item.id]?.message ?? 'Satın Al'}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

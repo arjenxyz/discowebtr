@@ -1,4 +1,10 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DiscoWeb - Web Arayüzü
+
+[![Website](https://img.shields.io/badge/Website-discowebtr.vercel.app-blue)](https://discowebtr.vercel.app)
+[![Docs](https://img.shields.io/badge/Docs-discowebtr.vercel.app/docs-green)](https://discowebtr.vercel.app/docs)
+[![Discord](https://img.shields.io/badge/Discord-3Y6YNwdE5Q-5865F2)](https://discord.gg/3Y6YNwdE5Q)
+
+DiscoWeb'in web arayüzü bileşeni. Next.js 16 ile geliştirilmiş modern, responsive bir yönetim paneli.
 
 ## Getting Started
 

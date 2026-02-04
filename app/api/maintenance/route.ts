@@ -1,15 +1,20 @@
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { getMaintenanceFlags } from '@/lib/maintenance';
 
-const GUILD_ID = process.env.DISCORD_GUILD_ID ?? '1465698764453838882';
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || process.env.DISCORD_GUILD_ID || '1465698764453838882';
+};
 
-const getDiscordProfile = async (userId: string) => {
+const getDiscordProfile = async (userId: string, guildId: string) => {
   const botToken = process.env.DISCORD_BOT_TOKEN;
   if (!botToken) {
     return null;
   }
 
-  const response = await fetch(`https://discord.com/api/guilds/${GUILD_ID}/members/${userId}`, {
+  const response = await fetch(`https://discord.com/api/guilds/${guildId}/members/${userId}`, {
     headers: { Authorization: `Bot ${botToken}` },
   });
 
@@ -36,7 +41,8 @@ const getDiscordProfile = async (userId: string) => {
 };
 
 export async function GET() {
-  const data = await getMaintenanceFlags();
+  const selectedGuildId = await getSelectedGuildId();
+  const data = await getMaintenanceFlags(selectedGuildId);
   if (!data) {
     return NextResponse.json({ error: 'unavailable' }, { status: 500 });
   }
@@ -46,7 +52,7 @@ export async function GET() {
     .filter((value): value is string => Boolean(value));
 
   const uniqueIds = [...new Set(updaterIds)];
-  const profiles = await Promise.all(uniqueIds.map(async (id) => [id, await getDiscordProfile(id)]));
+  const profiles = await Promise.all(uniqueIds.map(async (id) => [id, await getDiscordProfile(id, selectedGuildId)]));
   const updaterProfiles = Object.fromEntries(
     profiles.filter(([, profile]) => profile).map(([id, profile]) => [id, profile]),
   ) as Record<string, { id: string; name: string; avatarUrl: string }>;

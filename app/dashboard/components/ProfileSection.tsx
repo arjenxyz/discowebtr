@@ -20,7 +20,7 @@ export default function ProfileSection({
 }: ProfileSectionProps) {
   return (
     <section className="grid gap-4">
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-6">
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-indigo-300">Profil</p>
         <h1 className="mt-2 text-2xl font-semibold">Hoş geldin!</h1>
         <p className="mt-1 text-sm text-white/60">Discord bilgileriniz ve rolleriniz burada görünür.</p>

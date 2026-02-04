@@ -18,7 +18,7 @@ export default function TransactionsSection({
   renderPapelAmount,
 }: TransactionsSectionProps) {
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+    <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">İşlemler</h2>

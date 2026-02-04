@@ -3,6 +3,72 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes turkiye-blink {
+  0%, 50% {
+    color: #ef4444; /* red-500 */
+  }
+  51%, 100% {
+    color: white;
+  }
+}
+
+@keyframes turkiye-effect {
+  0%, 50% {
+    color: #ef4444;
+    transform: scale(1);
+    text-shadow: 0 0 5px #ef4444, 0 0 10px #ef4444;
+  }
+  51%, 100% {
+    color: white;
+    transform: scale(1.05);
+    text-shadow: 0 0 10px white, 0 0 20px white;
+  }
+}
+
+@keyframes turkiye-glow {
+  0%, 100% {
+    color: #ef4444;
+    text-shadow: 0 0 5px #ef4444, 0 0 10px #ef4444, 0 0 15px #ef4444;
+  }
+  25% {
+    color: #3b82f6;
+    text-shadow: 0 0 5px #3b82f6, 0 0 10px #3b82f6, 0 0 15px #3b82f6;
+  }
+  50% {
+    color: white;
+    text-shadow: 0 0 5px white, 0 0 10px white, 0 0 15px white;
+  }
+  75% {
+    color: #10b981;
+    text-shadow: 0 0 5px #10b981, 0 0 10px #10b981, 0 0 15px #10b981;
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+.animate-turkiye-blink {
+  animation: turkiye-blink 2s ease-in-out infinite;
+}
+
+.animate-turkiye-effect {
+  animation: turkiye-effect 2s ease-in-out infinite;
+}
+
+.animate-turkiye-glow {
+  animation: turkiye-glow 3s ease-in-out infinite;
+}
+
 .scrollbar-hidden {
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -88,3 +154,91 @@ html, body {
   opacity: 1;
   transform: translateY(0);
 }
+
+@keyframes marquee {
+  0% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 20s linear infinite;
+}
+
+/* Discord Tutarlı Renk Paleti */
+:root {
+  --discord-blurple: #5865F2;
+  --discord-dark: #23272A;
+  --discord-darker: #1E2124;
+  --discord-not-quite-black: #2C2F33;
+  --discord-light: #7289DA;
+  --discord-greyple: #99AAB5;
+}
+
+@layer utilities {
+  .bg-discord-radial {
+    background-image: radial-gradient(
+      circle at center,
+      #0f1419 0%,           /* Çok koyu merkez */
+      #1a1c23 15%,          /* Koyu geçiş */
+      #2c3e8f 35%,          /* Orta koyu mavi */
+      #3949ab 60%,          /* Orta mavi */
+      #5865f2 85%,          /* Discord mavi */
+      #7289da 100%          /* Açık Discord mavi */
+    );
+    background-attachment: fixed;
+    background-size: cover;
+  }
+}
+
+/* Türkiye yanıp sönme animasyonu */
+@keyframes turkiye-blink {
+  0%, 100% {
+    color: #ef4444;
+  }
+  50% {
+    color: #ffffff;
+  }
+}
+
+
+
+/* Marquee animasyonu */
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 20s linear infinite;
+}
+
+/* Shimmer efekti */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+}
+
+
+.animate-glow-pulse {
+  animation: glow-pulse 3s ease-in-out infinite;
+}
+
+
+
+

@@ -109,7 +109,9 @@ export default function AdminNotificationSendPage() {
     const timer = setTimeout(async () => {
       setMemberLoading(true);
       try {
-        const response = await fetch(`/api/admin/members/search?q=${encodeURIComponent(memberQuery.trim())}`);
+        const response = await fetch(`/api/admin/members/search?q=${encodeURIComponent(memberQuery.trim())}`, {
+          credentials: 'include'
+        });
         if (response.ok) {
           const data = (await response.json()) as MemberResult[];
           setMemberResults(data ?? []);

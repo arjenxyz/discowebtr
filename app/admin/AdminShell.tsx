@@ -66,6 +66,12 @@ const MENU_GROUPS = [
             icon: <LuTriangle className="h-4 w-4" />,
           },
           {
+            href: '/admin/store/orders/failed',
+            label: 'Başarısız Siparişler',
+            group: 'Siparişler',
+            icon: <LuFileText className="h-4 w-4" />,
+          },
+          {
             href: '/admin/store/products',
             label: 'Ürün Listesi',
             group: 'Listeler',
@@ -92,7 +98,6 @@ const MENU_GROUPS = [
     items: [
       { href: '/admin/wallet', label: 'Bakiye Yönetimi', icon: <LuWallet className="h-5 w-5" /> },
       { href: '/admin/log-channels', label: 'Log Kanalları', icon: <LuClipboardList className="h-5 w-5" /> },
-      { href: '/admin/maintenance', label: 'Bakım', icon: <LuSettings className="h-5 w-5" /> },
     ],
   },
 ];
@@ -233,7 +238,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                   <div>
                     <p className="text-[11px] uppercase tracking-[0.3em] text-white/40">Sunucu</p>
                     <p className="text-sm font-semibold text-white">
-                      {profile?.guildName ?? 'Disc Nexus'}
+                      {profile?.guildName ?? 'Veri Merkezi'}
                     </p>
                   </div>
                   <span className="rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-emerald-200">

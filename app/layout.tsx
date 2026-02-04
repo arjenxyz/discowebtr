@@ -6,8 +6,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Yönetim Paneli",
-  description: "Resmi Topluluk Sistemi",
+  title: "DiscoWeb - Discord Yönetim Paneli",
+  description: "Özel Discord sunucuları için geliştirilmiş, yapay zeka destekli gelişmiş yönetim platformu.",
 };
 
 export default function RootLayout({

@@ -1,5 +1,5 @@
 // Ortak Section tipi
-export type Section = 'overview' | 'store' | 'transactions' | 'tracking' | 'profile' | 'settings' | 'notifications';
+export type Section = 'overview' | 'store' | 'transactions' | 'tracking' | 'profile' | 'settings' | 'notifications' | 'mail';
 export type Notification = {
   id: string;
   title: string;
@@ -11,6 +11,18 @@ export type Notification = {
   is_read?: boolean;
   details_url?: string | null;
   image_url?: string | null;
+};
+
+export type MailItem = {
+  id: string;
+  title: string;
+  body: string;
+  category: 'announcement' | 'maintenance' | 'sponsor' | 'update' | 'lottery' | 'reward' | string;
+  status?: 'published' | 'draft';
+  created_at: string;
+  author_name?: string | null;
+  author_avatar_url?: string | null;
+  is_read?: boolean;
 };
 
 export type MemberProfile = {
@@ -33,6 +45,20 @@ export type StoreItem = {
   role_id: string | null;
   duration_days: number;
   created_at: string;
+};
+
+export type CartItem = {
+  itemId: string;
+  title: string;
+  price: number;
+  qty: number;
+  appliedDiscount?: {
+    id: string;
+    code: string;
+    percent: number;
+    discountAmount: number;
+    finalPrice: number;
+  } | null;
 };
 
 export type Order = {

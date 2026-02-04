@@ -1,0 +1,580 @@
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+const getSupabase = () => {
+  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    return null;
+  }
+  return createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+};
+
+// Slugify function to create URL-friendly slugs
+function slugify(text: string): string {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')           // Replace spaces with -
+    .replace(/[^\w\-]+/g, '')       // Remove all non-word chars
+    .replace(/\-\-+/g, '-')         // Replace multiple - with single -
+    .replace(/^-+/, '')             // Trim - from start of text
+    .replace(/-+$/, '');            // Trim - from end of text
+}
+
+// Type used for summary items retrieved from DB
+type SavedChannel = { channel_type: string; channel_name: string; webhook_url?: string | null };
+
+export async function GET(request: Request) {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return NextResponse.json({ error: 'Veritabanı bağlantısı yapılandırılmamış' }, { status: 500 });
+  }
+
+  const cookies = request.headers.get('cookie') || '';
+  const guildIdMatch = cookies.match(/selected_guild_id=([^;]+)/);
+  const guildId = guildIdMatch ? guildIdMatch[1] : null;
+
+  if (!guildId) {
+    return NextResponse.json({ error: 'Sunucu kimliği bulunamadı' }, { status: 400 });
+  }
+
+  const { data: server, error } = await supabase
+    .from('servers')
+    .select('discord_id, admin_role_id, verify_role_id, is_setup')
+    .eq('discord_id', guildId)
+    .maybeSingle();
+
+  if (error) {
+    return NextResponse.json({ error: 'Sunucu bilgileri alınamadı' }, { status: 500 });
+  }
+
+  if (!server) {
+    return NextResponse.json({ exists: false, is_setup: false });
+  }
+
+  return NextResponse.json({
+    exists: true,
+    is_setup: !!server.is_setup,
+    admin_role_id: server.admin_role_id || null,
+    verify_role_id: server.verify_role_id || null,
+  });
+}
+
+export async function POST(request: Request) {
+  try {
+    const { guildId, adminRoleId, verifyRoleId } = await request.json();
+
+    if (!guildId || !adminRoleId || !verifyRoleId) {
+      return NextResponse.json(
+        { error: 'guildId, adminRoleId ve verifyRoleId gerekli' },
+        { status: 400 }
+      );
+    }
+
+    const botToken = process.env.DISCORD_BOT_TOKEN;
+    if (!botToken) {
+      return NextResponse.json(
+        { error: 'Bot token yapılandırılmamış' },
+        { status: 500 }
+      );
+    }
+
+    const supabase = getSupabase();
+    if (!supabase) {
+      return NextResponse.json(
+        { error: 'Veritabanı bağlantısı yapılandırılmamış' },
+        { status: 500 }
+      );
+    }
+
+    // Kullanıcının admin olup olmadığını kontrol et
+    const cookies = request.headers.get('cookie') || '';
+    const userIdMatch = cookies.match(/discord_user_id=([^;]+)/);
+    const userId = userIdMatch ? userIdMatch[1] : null;
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Kullanıcı kimliği bulunamadı' },
+        { status: 401 }
+      );
+    }
+
+    // Kullanıcının sunucuda admin olup olmadığını kontrol et
+    const memberResponse = await fetch(
+      `https://discord.com/api/guilds/${guildId}/members/${userId}`,
+      {
+        headers: { Authorization: `Bot ${botToken}` },
+      },
+    );
+
+    if (!memberResponse.ok) {
+      return NextResponse.json(
+        { error: 'Kullanıcı sunucuda bulunamadı' },
+        { status: 403 }
+      );
+    }
+
+    const member = await memberResponse.json();
+
+    // Sunucu bilgilerini al
+    const guildResponse = await fetch(
+      `https://discord.com/api/guilds/${guildId}`,
+      {
+        headers: { Authorization: `Bot ${botToken}` },
+      },
+    );
+
+    if (!guildResponse.ok) {
+      return NextResponse.json(
+        { error: 'Sunucu bilgileri alınamadı' },
+        { status: 500 }
+      );
+    }
+
+    const guild = await guildResponse.json();
+
+    // Kurulum öncesi: Sadece sunucu sahibi kurulum yapabilir
+    // Kurulum sonrası: Admin rolü ile kontrol yapılır
+    const isOwner = guild.owner_id === userId;
+    const isAdmin = member.roles.includes(adminRoleId);
+
+    if (!isOwner) {
+      return NextResponse.json(
+        { error: 'Bu işlem için sunucu sahibi olmanız gerekir' },
+        { status: 403 }
+      );
+    }
+
+    // Debug logging for incoming role selections
+    console.log('Setup payload:', { guildId, adminRoleId, verifyRoleId, userId });
+
+    // Fetch guild roles to validate provided role IDs
+    const rolesResponse = await fetch(`https://discord.com/api/guilds/${guildId}/roles`, {
+      headers: { Authorization: `Bot ${botToken}` },
+    });
+    let guildRoles: Array<{ id: string; permissions?: string }> = [];
+    if (rolesResponse.ok) {
+      guildRoles = await rolesResponse.json();
+    } else {
+      console.warn('Warning: could not fetch guild roles for validation', rolesResponse.status);
+    }
+
+    // Veritabanında sunucuyu güncelle/kaydet
+    const { data: existingServer } = await supabase
+      .from('servers')
+      .select('id, discord_id')
+      .eq('discord_id', guildId)
+      .single();
+
+    let serverId: string;
+
+    // Validate provided role IDs
+    const findRole = (id: string | null) => guildRoles.find(r => r.id === id) || null;
+    const adminRoleObj = findRole(adminRoleId);
+    const verifyRoleObj = findRole(verifyRoleId);
+
+    // Admin role must exist and have admin/manage guild/manage roles perms
+    if (!adminRoleObj) {
+      return NextResponse.json({ error: 'Belirtilen admin rolü sunucuda bulunamadı' }, { status: 400 });
+    }
+    const perms = BigInt(adminRoleObj.permissions ?? '0');
+    const hasAdminPerm = (perms & BigInt(0x8)) !== BigInt(0) || (perms & BigInt(0x20)) !== BigInt(0) || (perms & BigInt(0x10000000)) !== BigInt(0);
+    if (!hasAdminPerm) {
+      return NextResponse.json({ error: 'Seçilen admin rolü gerekli yönetim izinlerine sahip değil' }, { status: 400 });
+    }
+
+    if (!verifyRoleObj) {
+      return NextResponse.json({ error: 'Belirtilen verify rolü sunucuda bulunamadı' }, { status: 400 });
+    }
+
+    if (existingServer) {
+      // Mevcut sunucuyu güncelle
+      const { data: updatedServer, error: updateError } = await supabase
+        .from('servers')
+        .update({
+          name: guild.name,
+          admin_role_id: adminRoleId,
+          verify_role_id: verifyRoleId,
+          is_setup: true,
+        })
+        .eq('discord_id', guildId)
+        .select('id, discord_id, admin_role_id, verify_role_id')
+        .single();
+
+      if (updateError) {
+        console.error('Server update error:', updateError);
+        return NextResponse.json(
+          { error: 'Sunucu güncellenirken hata oluştu' },
+          { status: 500 }
+        );
+      }
+      serverId = updatedServer.id;
+      console.log('Server updated:', updatedServer);
+    } else {
+      // Yeni sunucu oluştur
+      const uniqueSlug = `${slugify(guild.name)}-${guildId}`;
+      const { data: newServer, error: insertError } = await supabase
+        .from('servers')
+        .insert({
+          discord_id: guildId,
+          name: guild.name,
+          slug: uniqueSlug,
+          admin_role_id: adminRoleId,
+          verify_role_id: verifyRoleId,
+          is_setup: true,
+        })
+        .select('id, discord_id, admin_role_id, verify_role_id')
+        .single();
+
+      if (insertError) {
+        console.error('Server insert error:', insertError);
+        return NextResponse.json(
+          { error: 'Sunucu oluşturulurken hata oluştu', detail: insertError.message, code: insertError.code },
+          { status: 500 }
+        );
+      }
+      serverId = newServer.id;
+      console.log('Server created:', newServer);
+    }
+
+    // Double-check roles stored in DB for debugging
+    console.log('Storing roles (payload):', { adminRoleId, verifyRoleId });
+
+    // Fetch and log the saved server row to ensure values are persisted
+    try {
+      const { data: saved, error: savedErr } = await supabase
+        .from('servers')
+        .select('id, discord_id, admin_role_id, verify_role_id')
+        .eq('discord_id', guildId)
+        .single();
+      if (savedErr) {
+        console.warn('Could not fetch saved server row:', savedErr);
+      } else {
+        console.log('Saved server row:', saved);
+      }
+    } catch (fetchErr) {
+      console.warn('Exception fetching saved server row:', fetchErr);
+    }
+
+    // Log kanalları için kategoriler oluştur
+    const createCategory = async (name: string) => {
+      const resp = await fetch(`https://discord.com/api/guilds/${guildId}/channels`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bot ${botToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name,
+          type: 4,
+          permission_overwrites: [
+            {
+              id: guildId,
+              type: 0,
+              deny: '1024',
+            },
+            {
+              id: adminRoleId,
+              type: 0,
+              allow: '1024',
+            },
+          ],
+        }),
+      });
+
+      if (!resp.ok) {
+        return null;
+      }
+
+      const category = await resp.json();
+      return category.id as string;
+    };
+
+    const userCategoryId = await createCategory('💠Web Logs • Üyeler');
+    const adminCategoryId = await createCategory('💠Web Logs • Admin');
+    const createdChannels: Array<{ type: string; name: string; id?: string; webhookUrl?: string | null }> = [];
+
+    if (userCategoryId && adminCategoryId) {
+      // Log kanallarını oluştur
+      const logChannels = [
+        { name: 'user-main-log', type: 'user_main', parentId: userCategoryId },
+        { name: 'user-auth-log', type: 'user_auth', parentId: userCategoryId },
+        { name: 'user-roles-log', type: 'user_roles', parentId: userCategoryId },
+        { name: 'user-exchange-log', type: 'user_exchange', parentId: userCategoryId },
+        { name: 'user-store-log', type: 'user_store', parentId: userCategoryId },
+        { name: 'admin-main-log', type: 'admin_main', parentId: adminCategoryId },
+        { name: 'admin-wallet-log', type: 'admin_wallet', parentId: adminCategoryId },
+        { name: 'admin-store-log', type: 'admin_store', parentId: adminCategoryId },
+        { name: 'admin-notifications-log', type: 'admin_notifications', parentId: adminCategoryId },
+        { name: 'admin-settings-log', type: 'admin_settings', parentId: adminCategoryId },
+      ];
+
+      for (const logChannel of logChannels) {
+        // Create the channel with a professional topic
+        const channelResponse = await fetch(
+          `https://discord.com/api/guilds/${guildId}/channels`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bot ${botToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              name: logChannel.name,
+              type: 0, // Text channel
+              parent_id: logChannel.parentId,
+              topic: `Automated log channel (${logChannel.type}) — created by Web setup`,
+              permission_overwrites: [
+                {
+                  id: guildId, // @everyone
+                  type: 0,
+                  deny: '1024', // ViewChannel
+                },
+                {
+                  id: adminRoleId,
+                  type: 0,
+                  allow: '1024', // ViewChannel
+                },
+              ],
+            }),
+          },
+        );
+
+        if (channelResponse.ok) {
+          const channel = await channelResponse.json();
+
+          // Webhook oluştur veya mevcut webhook'u bul
+          let webhookUrl: string | null = null;
+          try {
+            // Try to create new webhook
+            const webhookResponse = await fetch(
+              `https://discord.com/api/channels/${channel.id}/webhooks`,
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bot ${botToken}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  name: `${logChannel.type}-webhook`,
+                }),
+              },
+            );
+
+            if (webhookResponse.ok) {
+              const webhook = await webhookResponse.json();
+              webhookUrl = `https://discord.com/api/webhooks/${webhook.id}/${webhook.token}`;
+              console.log('✅ Webhook oluşturuldu:', logChannel.type, webhookUrl);
+            } else {
+              // If creation fails, try to list existing webhooks and pick first
+              console.warn('⚠️ Webhook oluşturulamadı, deneyeceğim mevcut webhookları almak:', logChannel.type, webhookResponse.status);
+              const listResp = await fetch(`https://discord.com/api/channels/${channel.id}/webhooks`, {
+                headers: { Authorization: `Bot ${botToken}` },
+              });
+              if (listResp.ok) {
+                const list = await listResp.json();
+                if (Array.isArray(list) && list.length > 0) {
+                  const wh = list[0];
+                  webhookUrl = `https://discord.com/api/webhooks/${wh.id}/${wh.token}`;
+                  console.log('ℹ️ Mevcut webhook bulundu:', webhookUrl);
+                }
+              }
+            }
+          } catch (webhookError) {
+            console.log(`❌ Webhook işlemi sırasında hata (create/list) ${logChannel.name}:`, webhookError);
+          }
+
+          createdChannels.push({
+            type: logChannel.type,
+            name: logChannel.name,
+            id: channel.id,
+            webhookUrl,
+          });
+
+          // Veritabanına kaydet (webhook_url nil olabilir)
+          const { error: botLogUpsertError } = await supabase
+            .from('bot_log_channels')
+            .upsert({
+              guild_id: guildId,
+              channel_type: logChannel.type,
+              channel_id: channel.id,
+              category_id: logChannel.parentId,
+              webhook_url: webhookUrl,
+              is_active: webhookUrl ? true : false,
+            });
+
+          if (botLogUpsertError) {
+            console.error('❌ bot_log_channels upsert error:', botLogUpsertError);
+          }
+
+          // Ayrıca konfigürasyon tablosuna webhook'u kaydet (varsayılan aktiflik webhooka bağlı)
+          const { error: logConfigUpsertError } = await supabase
+            .from('log_channel_configs')
+            .upsert({
+              guild_id: guildId,
+              channel_type: logChannel.type,
+              webhook_url: webhookUrl,
+              is_active: webhookUrl ? true : false,
+            });
+
+          if (logConfigUpsertError) {
+            console.error('❌ log_channel_configs upsert error:', logConfigUpsertError);
+          }
+        } else {
+          createdChannels.push({
+            type: logChannel.type,
+            name: logChannel.name,
+          });
+        }
+      }
+    }
+
+    // Log kanal konfigürasyonlarını da (varsayılan aktif) kaydet - varsa güncelle
+    const defaultChannels = [
+      'user_main',
+      'user_auth',
+      'user_roles',
+      'user_exchange',
+      'user_store',
+      'admin_main',
+      'admin_wallet',
+      'admin_store',
+      'admin_notifications',
+      'admin_settings',
+    ];
+
+    await supabase
+      .from('log_channel_configs')
+      .upsert(
+        defaultChannels.map((ct) => ({
+          guild_id: guildId,
+          channel_type: ct,
+          is_active: false,
+        })),
+        { onConflict: 'guild_id,channel_type', ignoreDuplicates: true },
+      );
+
+    // Send webhook test messages for all configured channels
+    try {
+      let botAvatarUrl: string | null = null;
+      try {
+        const meResp = await fetch('https://discord.com/api/users/@me', {
+          headers: { Authorization: `Bot ${botToken}` },
+        });
+        if (meResp.ok) {
+          const bot = await meResp.json();
+          if (bot?.id && bot?.avatar) {
+            botAvatarUrl = `https://cdn.discordapp.com/avatars/${bot.id}/${bot.avatar}.png`;
+          }
+        }
+      } catch {
+        // ignore avatar lookup errors
+      }
+
+      const { data: testTargets } = await supabase
+        .from('log_channel_configs')
+        .select('channel_type,webhook_url,is_active')
+        .eq('guild_id', guildId)
+        .eq('is_active', true);
+
+      const { data: botChannels } = await supabase
+        .from('bot_log_channels')
+        .select('channel_type,channel_id')
+        .eq('guild_id', guildId);
+
+      const channelIdMap = new Map<string, string>();
+      (botChannels || []).forEach((row) => {
+        if (row.channel_type && row.channel_id) {
+          channelIdMap.set(row.channel_type, row.channel_id);
+        }
+      });
+
+      if (Array.isArray(testTargets) && testTargets.length > 0) {
+        await Promise.allSettled(
+          testTargets
+            .filter((row) => row.webhook_url)
+            .map((row) => {
+              const channelId = channelIdMap.get(row.channel_type);
+              const channelText = channelId ? `<#${channelId}>` : row.channel_type;
+              return fetch(row.webhook_url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  username: 'Veri Merkezi',
+                  avatar_url: botAvatarUrl ?? undefined,
+                  embeds: [
+                    {
+                      title: 'Webhook Bağlantı Onayı',
+                      description:
+                        `Bu mesaj, webhook servisinin hedef URL ile başarılı bir şekilde eşleştiğini doğrulamak amacıyla sistem tarafından otomatik olarak oluşturulmuştur.\n\n` +
+                        `İşlem: Otomatik Kurulum Testi\n` +
+                        `Kanal: ${channelText}\n\n` +
+                        `Önemli Not: Eğer bu mesajın iletildiği kanal bilgileri veya yapılandırma ayarları sisteminizle uyuşmuyorsa, lütfen vakit kaybetmeden destek sunucumuza gelerek teknik ekibimizle iletişime geçiniz.`,
+                      color: 3982620,
+                      author: botAvatarUrl ? { name: 'Veri Merkezi', icon_url: botAvatarUrl } : { name: 'Veri Merkezi' },
+                    },
+                  ],
+                }),
+              });
+            })
+        );
+      }
+    } catch (testError) {
+      console.warn('Webhook test messages failed:', testError);
+    }
+
+    // Prepare and send a professional summary to the main-log webhook if present
+    try {
+      const { data: savedChannels } = await supabase
+        .from('bot_log_channels')
+        .select('channel_type,channel_name,webhook_url')
+        .eq('guild_id', guildId);
+
+      const summaryItems = ((savedChannels || []) as SavedChannel[]).map((c) => ({ type: c.channel_type, name: c.channel_name, webhook: c.webhook_url || null }));
+
+      const mainEntry = summaryItems.find(s => s.type === 'admin_main') || summaryItems.find(s => s.type === 'user_main');
+      if (mainEntry && mainEntry.webhook) {
+        const payload = {
+          embeds: [
+            {
+              title: '✅ Sunucu Kurulumu Tamamlandı',
+              description: `Sunucu **${guild.name}** için log kanalları başarıyla oluşturuldu ve webhook'lar atandı.`,
+              color: 5793266,
+              fields: [
+                { name: 'Toplam Kanal', value: `${summaryItems.length}`, inline: true },
+                { name: 'Kanallar', value: summaryItems.map(s => `• ${s.name} (${s.type}) — ${s.webhook ? 'Webhook ✅' : 'Webhook ❌'}`).join('\n'), inline: false },
+              ],
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        };
+
+        await fetch(mainEntry.webhook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
+    } catch (summaryErr) {
+      console.warn('⚠️ Özet webhook gönderimi sırasında hata:', summaryErr);
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Sunucu başarıyla kuruldu',
+      serverId,
+      userCategoryId,
+      adminCategoryId,
+      createdChannels,
+    });
+
+  } catch (error) {
+    console.error('Setup API error:', error);
+    return NextResponse.json(
+      { error: 'Kurulum sırasında beklenmeyen hata oluştu' },
+      { status: 500 }
+    );
+  }
+}

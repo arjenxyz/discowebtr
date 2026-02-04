@@ -33,6 +33,7 @@ drop table if exists public.ai_scenarios cascade;
 drop table if exists public.store_discounts cascade;
 drop table if exists public.promotions cascade;
 drop table if exists public.store_orders cascade;
+drop table if exists public.users cascade;
 drop table if exists public.servers cascade;
 
 -- Tablo kurulumları
@@ -40,12 +41,25 @@ create table public.servers (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   slug text not null unique,
-  discord_id text,
+  discord_id text unique,
   avatar_url text,
+  admin_role_id text, -- Admin rol ID'si
+  verify_role_id text, -- Verify rol ID'si
+  is_setup boolean not null default false,
   approval_threshold numeric not null default 80,
   transfer_daily_limit numeric not null default 200,
   transfer_tax_rate numeric not null default 0.05,
   created_at timestamptz not null default now()
+);
+
+create table public.users (
+  id uuid primary key default gen_random_uuid(),
+  discord_id text not null unique,
+  username text not null,
+  points integer not null default 0,
+  role_level integer not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table public.store_items (
@@ -74,7 +88,8 @@ create table public.store_orders (
   failure_reason text,
   amount numeric not null,
   status text not null check (status in ('paid','pending','refunded','failed')),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz
 );
 
 create table public.promotions (
@@ -86,7 +101,8 @@ create table public.promotions (
   used_count integer not null default 0,
   status text not null check (status in ('active','disabled','expired')),
   expires_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz
 );
 
 create table public.store_discounts (
@@ -125,21 +141,6 @@ create table public.ai_case_runs (
   created_at timestamptz not null default now()
 );
 
-create table public.public_metrics (
-  id uuid primary key default gen_random_uuid(),
-  server_id uuid not null references public.servers(id) on delete cascade,
-  slug text not null unique,
-  server_name text not null,
-  store_revenue numeric not null default 0,
-  active_promotions integer not null default 0,
-  eligible_candidates integer not null default 0,
-  ai_moderation_accuracy numeric not null default 0,
-  ai_training_accuracy numeric not null default 0,
-  processed_scenarios integer not null default 0,
-  approval_threshold numeric not null default 80,
-  updated_at timestamptz not null default now()
-);
-
 create table public.maintenance_flags (
   id uuid primary key default gen_random_uuid(),
   server_id uuid not null references public.servers(id) on delete cascade,
@@ -167,6 +168,7 @@ create table public.member_profiles (
   guild_id text not null,
   user_id text not null,
   about text,
+  deleted_at timestamptz, -- Soft delete için
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (guild_id, user_id)
@@ -177,6 +179,7 @@ create table public.member_wallets (
   guild_id text not null,
   user_id text not null,
   balance numeric not null default 0,
+  deleted_at timestamptz, -- Soft delete için
   updated_at timestamptz not null default now(),
   unique (guild_id, user_id)
 );
@@ -189,6 +192,7 @@ create table public.wallet_ledger (
   type text not null check (type in ('earn_voice','earn_message','transfer_in','transfer_out','transfer_tax','purchase','admin_adjust','refund','promotion')),
   balance_after numeric,
   metadata jsonb not null default '{}'::jsonb,
+  deleted_at timestamptz, -- Soft delete için
   created_at timestamptz not null default now()
 );
 
@@ -200,6 +204,7 @@ create table public.daily_earnings (
   earning_date date not null,
   amount numeric not null default 0,
   settled_at timestamptz,
+  deleted_at timestamptz, -- Soft delete için
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (guild_id, user_id, source, earning_date)
@@ -212,6 +217,7 @@ create table public.member_daily_stats (
   stat_date date not null,
   message_count integer not null default 0,
   voice_minutes integer not null default 0,
+  deleted_at timestamptz, -- Soft delete için
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (guild_id, user_id, stat_date)
@@ -223,6 +229,7 @@ create table public.server_daily_stats (
   stat_date date not null,
   message_count integer not null default 0,
   voice_minutes integer not null default 0,
+  deleted_at timestamptz, -- Soft delete için
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (guild_id, stat_date)
@@ -235,6 +242,7 @@ create table public.member_overview_stats (
   total_messages integer not null default 0,
   total_voice_minutes integer not null default 0,
   updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
   unique (guild_id, user_id)
 );
 
@@ -244,6 +252,7 @@ create table public.server_overview_stats (
   total_messages integer not null default 0,
   total_voice_minutes integer not null default 0,
   updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
   unique (guild_id)
 );
 
@@ -257,11 +266,27 @@ create table public.web_audit_logs (
   ip_address text,
   user_agent text,
   metadata jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+create table public.public_metrics (
+  id uuid primary key default gen_random_uuid(),
+  server_id uuid not null references public.servers(id) on delete cascade,
+  total_users integer not null default 0,
+  active_users_24h integer not null default 0,
+  total_messages integer not null default 0,
+  total_voice_minutes integer not null default 0,
+  total_wallet_balance numeric not null default 0,
+  total_store_orders integer not null default 0,
+  total_store_revenue numeric not null default 0,
+  updated_at timestamptz not null default now(),
+  unique (server_id)
 );
 
 create table public.notifications (
   id uuid primary key default gen_random_uuid(),
+  guild_id text not null, -- Sunucu ID'si
   title text not null,
   body text not null,
   type text not null check (type in ('announcement','mail')),
@@ -318,66 +343,12 @@ create index notifications_status_idx on public.notifications (status);
 create index notifications_created_idx on public.notifications (created_at desc);
 create index notification_reads_user_idx on public.notification_reads (user_id);
 
--- Metrik güncelleme fonksiyonları
-create or replace function public.refresh_public_metrics(p_server_id uuid)
-returns void
-language plpgsql
-as $$
-declare
-  v_threshold numeric;
-begin
-  select approval_threshold into v_threshold from public.servers where id = p_server_id;
-
-  update public.public_metrics
-  set
-    store_revenue = coalesce((select sum(amount) from public.store_orders where server_id = p_server_id and status = 'paid'), 0),
-    active_promotions = coalesce((select count(*) from public.promotions where server_id = p_server_id and status = 'active' and (expires_at is null or expires_at > now())), 0),
-    eligible_candidates = coalesce((select count(*) from public.ai_candidate_scores where server_id = p_server_id and accuracy >= v_threshold), 0),
-    ai_moderation_accuracy = coalesce((select avg(accuracy) from public.ai_scenarios where server_id = p_server_id and scenario_type = 'moderation'), 0),
-    ai_training_accuracy = coalesce((select avg(accuracy) from public.ai_scenarios where server_id = p_server_id and scenario_type = 'training'), 0),
-    processed_scenarios = coalesce((select count(*) from public.ai_case_runs where server_id = p_server_id), 0),
-    approval_threshold = coalesce(v_threshold, 80),
-    updated_at = now()
-  where server_id = p_server_id;
-end;
-$$;
-
-create or replace function public.touch_public_metrics()
-returns trigger
-language plpgsql
-as $$
-begin
-  perform public.refresh_public_metrics(coalesce(new.server_id, old.server_id));
-  return null;
-end;
-$$;
-
-create trigger store_orders_metrics_trigger
-after insert or update or delete on public.store_orders
-for each row execute function public.touch_public_metrics();
-
-create trigger promotions_metrics_trigger
-after insert or update or delete on public.promotions
-for each row execute function public.touch_public_metrics();
-
-create trigger ai_scenarios_metrics_trigger
-after insert or update or delete on public.ai_scenarios
-for each row execute function public.touch_public_metrics();
-
-create trigger ai_candidate_scores_metrics_trigger
-after insert or update or delete on public.ai_candidate_scores
-for each row execute function public.touch_public_metrics();
-
-create trigger ai_case_runs_metrics_trigger
-after insert or update or delete on public.ai_case_runs
-for each row execute function public.touch_public_metrics();
-
 -- İlk sunucu ve public metrics kaydı
 insert into public.servers (name, slug, discord_id, approval_threshold)
 values ('Disc Nexus', 'default', '000000000000000000', 80);
 
-insert into public.public_metrics (server_id, slug, server_name)
-select id, 'default', name from public.servers where slug = 'default';
+insert into public.public_metrics (server_id)
+select id from public.servers where slug = 'default';
 
 
 

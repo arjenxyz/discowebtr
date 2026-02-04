@@ -5,9 +5,16 @@ import { logWebEvent } from '@/lib/serverLogger';
 
 const DEFAULT_SLUG = 'default';
 const GUILD_ID = process.env.DISCORD_GUILD_ID ?? '1465698764453838882';
-const ADMIN_ROLE_ID = process.env.DISCORD_ADMIN_ROLE_ID;
 const MAINTENANCE_ROLE_ID =
   process.env.MAINTENANCE_ROLE_ID ?? process.env.DISCORD_MAINTENANCE_ROLE_ID;
+const DEFAULT_DEVELOPER_GUILD_ID = '1465698764453838882';
+const DEFAULT_DEVELOPER_ROLE_ID = '1467580199481639013';
+
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || GUILD_ID; // Fallback to default
+};
 
 const MAINTENANCE_KEYS = [
   'site',
@@ -44,13 +51,15 @@ const getUserId = async () => {
   return cookieStore.get('discord_user_id')?.value ?? null;
 };
 
-const hasRole = async (userId: string, roleId?: string | null) => {
+const hasRole = async (userId: string, roleId?: string | null, guildId?: string) => {
   const botToken = process.env.DISCORD_BOT_TOKEN;
   if (!botToken || !roleId) {
     return false;
   }
 
-  const memberResponse = await fetch(`https://discord.com/api/guilds/${GUILD_ID}/members/${userId}`, {
+  const targetGuildId = guildId || GUILD_ID;
+
+  const memberResponse = await fetch(`https://discord.com/api/guilds/${targetGuildId}/members/${userId}`, {
     headers: { Authorization: `Bot ${botToken}` },
   });
 
@@ -62,13 +71,15 @@ const hasRole = async (userId: string, roleId?: string | null) => {
   return member.roles.includes(roleId);
 };
 
-const getDiscordProfile = async (userId: string) => {
+const getDiscordProfile = async (userId: string, guildId?: string) => {
   const botToken = process.env.DISCORD_BOT_TOKEN;
   if (!botToken) {
     return null;
   }
 
-  const response = await fetch(`https://discord.com/api/guilds/${GUILD_ID}/members/${userId}`, {
+  const targetGuildId = guildId || GUILD_ID;
+
+  const response = await fetch(`https://discord.com/api/guilds/${targetGuildId}/members/${userId}`, {
     headers: { Authorization: `Bot ${botToken}` },
   });
 
@@ -100,12 +111,16 @@ const isMaintenanceAdmin = async () => {
     return { ok: false, userId: null };
   }
 
-  const [isAdmin, hasMaintenanceRole] = await Promise.all([
-    hasRole(userId, ADMIN_ROLE_ID),
-    hasRole(userId, MAINTENANCE_ROLE_ID),
-  ]);
+  const developerRoleId = process.env.DEVELOPER_ROLE_ID ?? DEFAULT_DEVELOPER_ROLE_ID;
+  const developerGuildId =
+    process.env.DEVELOPER_GUILD_ID ?? process.env.DISCORD_GUILD_ID ?? DEFAULT_DEVELOPER_GUILD_ID;
 
-  return { ok: isAdmin && hasMaintenanceRole, userId };
+  const isDeveloper = await hasRole(userId, developerRoleId, developerGuildId);
+  if (!isDeveloper) {
+    return { ok: false, userId };
+  }
+
+  return { ok: true, userId };
 };
 
 const ensureFlags = async (supabase: SupabaseClient, serverId: string) => {
@@ -153,6 +168,36 @@ const ensureFlags = async (supabase: SupabaseClient, serverId: string) => {
   return (refreshed ?? []) as MaintenanceFlag[];
 };
 
+const resolveServer = async (supabase: SupabaseClient) => {
+  const selectedGuildId = await getSelectedGuildId();
+
+  const { data: byDiscord, error: byDiscordError } = await supabase
+    .from('servers')
+    .select('id,name')
+    .eq('discord_id', selectedGuildId)
+    .maybeSingle();
+
+  if (byDiscordError) {
+    throw new Error(byDiscordError.message);
+  }
+
+  if (byDiscord) {
+    return byDiscord;
+  }
+
+  const { data: bySlug, error: bySlugError } = await supabase
+    .from('servers')
+    .select('id,name')
+    .eq('slug', DEFAULT_SLUG)
+    .maybeSingle();
+
+  if (bySlugError) {
+    throw new Error(bySlugError.message);
+  }
+
+  return bySlug ?? null;
+};
+
 export async function GET() {
   try {
     const supabase = getSupabase();
@@ -165,18 +210,9 @@ export async function GET() {
       return NextResponse.json({ error: 'forbidden' }, { status: 403 });
     }
 
-    const { data: server, error } = await supabase
-      .from('servers')
-      .select('id,name')
-      .eq('slug', DEFAULT_SLUG)
-      .maybeSingle();
-
-    if (error) {
-      return NextResponse.json({ error: 'server_fetch_failed', detail: error.message }, { status: 500 });
-    }
-
+    const server = await resolveServer(supabase);
     if (!server) {
-      return NextResponse.json({ error: 'server_not_found' }, { status: 404 });
+      return NextResponse.json({ error: 'server_not_found', detail: 'Sunucu kaydı bulunamadı.' }, { status: 404 });
     }
 
     const flags = await ensureFlags(supabase, server.id);
@@ -184,7 +220,8 @@ export async function GET() {
       .map((flag) => flag.updated_by)
       .filter((value): value is string => Boolean(value));
     const uniqueIds = [...new Set(updaterIds)];
-    const profiles = await Promise.all(uniqueIds.map(async (id) => [id, await getDiscordProfile(id)]));
+    const selectedGuildId = await getSelectedGuildId();
+    const profiles = await Promise.all(uniqueIds.map(async (id) => [id, await getDiscordProfile(id, selectedGuildId)]));
     const updaterProfiles = Object.fromEntries(
       profiles.filter(([, profile]) => profile).map(([id, profile]) => [id, profile]),
     ) as Record<string, { id: string; name: string; avatarUrl: string }>;
@@ -220,18 +257,9 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'invalid_key' }, { status: 400 });
     }
 
-    const { data: server, error: serverError } = await supabase
-      .from('servers')
-      .select('id')
-      .eq('slug', DEFAULT_SLUG)
-      .maybeSingle();
-
-    if (serverError) {
-      return NextResponse.json({ error: 'server_fetch_failed', detail: serverError.message }, { status: 500 });
-    }
-
+    const server = await resolveServer(supabase);
     if (!server) {
-      return NextResponse.json({ error: 'server_not_found' }, { status: 404 });
+      return NextResponse.json({ error: 'server_not_found', detail: 'Sunucu kaydı bulunamadı.' }, { status: 404 });
     }
 
     const { error } = await supabase
@@ -252,9 +280,12 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'update_failed', detail: error.message }, { status: 500 });
     }
 
+    const selectedGuildId = await getSelectedGuildId();
     await logWebEvent(request, {
       event: 'admin_maintenance_update',
       status: body.is_active ? 'enabled' : 'disabled',
+      userId: userId ?? undefined,
+      guildId: selectedGuildId,
       metadata: { key: body.key, reason: body.reason ?? null },
     });
 
@@ -263,7 +294,7 @@ export async function PUT(request: Request) {
       .map((flag) => flag.updated_by)
       .filter((value): value is string => Boolean(value));
     const uniqueIds = [...new Set(updaterIds)];
-    const profiles = await Promise.all(uniqueIds.map(async (id) => [id, await getDiscordProfile(id)]));
+    const profiles = await Promise.all(uniqueIds.map(async (id) => [id, await getDiscordProfile(id, selectedGuildId)]));
     const updaterProfiles = Object.fromEntries(
       profiles.filter(([, profile]) => profile).map(([id, profile]) => [id, profile]),
     ) as Record<string, { id: string; name: string; avatarUrl: string }>;

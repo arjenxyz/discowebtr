@@ -152,7 +152,7 @@ export default function StoreTrackingSection({ ordersLoading, orders }: StoreTra
         </div>
       </div>
 
-      <div className="rounded-2xl border border-white/5 bg-white/5 p-6">
+      <div className="rounded-2xl border border-white/5 bg-white/5 p-4 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-semibold">Aktif Roller</h3>
@@ -203,7 +203,7 @@ export default function StoreTrackingSection({ ordersLoading, orders }: StoreTra
         )}
       </div>
 
-      <div className="rounded-2xl border border-white/5 bg-white/5 p-6">
+      <div className="rounded-2xl border border-white/5 bg-white/5 p-4 sm:p-6">
         <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-white/40">Hızlı İpuçları</h3>
         <ul className="mt-4 space-y-3 text-sm text-white/60">
           <li className="flex gap-2">

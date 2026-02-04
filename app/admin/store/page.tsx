@@ -22,6 +22,11 @@ const QUICK_LINKS = [
     description: 'Onay bekleyen mağaza işlemlerini kontrol edin.',
   },
   {
+    href: '/admin/store/orders/failed',
+    title: 'Başarısız İşlemler',
+    description: 'Sistem hatalarından dolayı başarısız olan işlemleri görün.',
+  },
+  {
     href: '/admin/store/orders/stuck',
     title: 'Sorunlu İşlemler',
     description: 'Rol atanmamış onaylı işlemleri takip edin.',

@@ -27,7 +27,7 @@ export default function OverviewSection({
   formatRoleColor,
 }: OverviewSectionProps) {
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/5 p-6 overview-fade">
+    <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-6 overview-fade">
       <p className="text-xs font-semibold uppercase tracking-[0.3em] text-indigo-300">Genel Bakış</p>
       <p className="mt-1 text-sm text-white/60">
         Genel Bakış, sunucudaki aktivite ve profil özetinizi hızlıca görmeniz için tasarlanmıştır.

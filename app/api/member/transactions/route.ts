@@ -3,7 +3,6 @@ import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
 import { checkMaintenance } from '@/lib/maintenance';
 
-const DEFAULT_SLUG = 'default';
 const TIMEZONE_OFFSET_MINUTES = Number(process.env.PAPEL_TIMEZONE_OFFSET || 180);
 
 const getSupabase = () => {
@@ -13,6 +12,12 @@ const getSupabase = () => {
     return null;
   }
   return createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+};
+
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || process.env.DISCORD_GUILD_ID || '1465698764453838882';
 };
 
 export async function GET() {
@@ -35,10 +40,12 @@ export async function GET() {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
+  const selectedGuildId = await getSelectedGuildId();
+
   const { data: server, error: serverError } = await supabase
     .from('servers')
     .select('id')
-    .eq('slug', DEFAULT_SLUG)
+    .eq('discord_id', selectedGuildId)
     .maybeSingle();
 
   if (serverError || !server) {

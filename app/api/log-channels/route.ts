@@ -4,18 +4,24 @@ import { createClient } from '@supabase/supabase-js';
 import { logWebEvent } from '@/lib/serverLogger';
 
 const GUILD_ID = process.env.DISCORD_GUILD_ID ?? '1465698764453838882';
-const ADMIN_ROLE_ID = process.env.DISCORD_ADMIN_ROLE_ID;
+
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || GUILD_ID; // Fallback to default
+};
 
 const CHANNEL_TYPES = [
-  'main',
-  'auth',
-  'roles',
-  'system',
-  'suspicious',
-  'store',
-  'wallet',
-  'notifications',
-  'settings',
+  'user_main',
+  'user_auth',
+  'user_roles',
+  'user_exchange',
+  'user_store',
+  'admin_main',
+  'admin_wallet',
+  'admin_store',
+  'admin_notifications',
+  'admin_settings',
 ] as const;
 
 const getSupabase = () => {
@@ -30,27 +36,50 @@ const getSupabase = () => {
 };
 
 const isAdminUser = async () => {
-  const botToken = process.env.DISCORD_BOT_TOKEN;
-  if (!botToken || !ADMIN_ROLE_ID) {
+  try {
+    const botToken = process.env.DISCORD_BOT_TOKEN;
+    if (!botToken) {
+      return false;
+    }
+
+    const cookieStore = await cookies();
+    const userId = cookieStore.get('discord_user_id')?.value;
+    const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+    if (!userId || !selectedGuildId) {
+      return false;
+    }
+
+    // Get admin role ID from server config
+    const supabase = getSupabase();
+    if (!supabase) {
+      return false;
+    }
+
+    const { data: server } = await supabase
+      .from('servers')
+      .select('admin_role_id')
+      .eq('discord_id', selectedGuildId)
+      .maybeSingle();
+
+    if (!server?.admin_role_id) {
+      return false;
+    }
+
+    // Check Discord API for user roles
+    const memberResponse = await fetch(`https://discord.com/api/guilds/${selectedGuildId}/members/${userId}`, {
+      headers: { Authorization: `Bot ${botToken}` },
+    });
+
+    if (!memberResponse.ok) {
+      return false;
+    }
+
+    const member = (await memberResponse.json()) as { roles: string[] };
+    return member.roles.includes(server.admin_role_id);
+  } catch (error) {
+    console.error('Admin check failed:', error);
     return false;
   }
-
-  const cookieStore = await cookies();
-  const userId = cookieStore.get('discord_user_id')?.value;
-  if (!userId) {
-    return false;
-  }
-
-  const memberResponse = await fetch(`https://discord.com/api/guilds/${GUILD_ID}/members/${userId}`, {
-    headers: { Authorization: `Bot ${botToken}` },
-  });
-
-  if (!memberResponse.ok) {
-    return false;
-  }
-
-  const member = (await memberResponse.json()) as { roles: string[] };
-  return member.roles.includes(ADMIN_ROLE_ID);
 };
 
 const getAdminId = async () => {
@@ -68,10 +97,12 @@ export async function GET() {
     return NextResponse.json({ error: 'missing_service_role' }, { status: 500 });
   }
 
+  const selectedGuildId = await getSelectedGuildId();
+
   const { data } = await supabase
     .from('log_channel_configs')
     .select('channel_type, webhook_url, is_active')
-    .eq('guild_id', GUILD_ID);
+    .eq('guild_id', selectedGuildId);
 
   const configs = CHANNEL_TYPES.map((channelType) => {
     const found = data?.find((row) => row.channel_type === channelType);
@@ -95,6 +126,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'missing_service_role' }, { status: 500 });
   }
 
+  const selectedGuildId = await getSelectedGuildId();
   const adminId = await getAdminId();
   const { configs } = (await request.json()) as {
     configs: Array<{ channel_type: string; webhook_url: string; is_active: boolean }>;
@@ -103,7 +135,7 @@ export async function POST(request: Request) {
   const rows = configs
     .filter((config) => CHANNEL_TYPES.includes(config.channel_type as (typeof CHANNEL_TYPES)[number]))
     .map((config) => ({
-      guild_id: GUILD_ID,
+      guild_id: selectedGuildId,
       channel_type: config.channel_type,
       webhook_url: config.webhook_url.trim(),
       is_active: config.is_active,
@@ -131,7 +163,7 @@ export async function POST(request: Request) {
     event: 'admin_log_channels_update',
     status: 'success',
     userId: adminId ?? undefined,
-    guildId: GUILD_ID,
+    guildId: selectedGuildId,
     metadata: {
       updated: rows.map((row) => ({
         channel_type: row.channel_type,

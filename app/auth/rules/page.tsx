@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { LuLoader } from 'react-icons/lu';
 
 const RULES = [
   'Sunucu kurallarına ve topluluk standartlarına saygı gösterin.',
@@ -19,17 +20,25 @@ const INFO_POINTS = [
   'Transfer limitleri ve vergiler sunucu ayarlarına göre uygulanır.',
 ];
 
-export default function DiscordRulesPage() {
+function RulesPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accepted, setAccepted] = useState(false);
+
+  const pendingGuildId = searchParams.get('pendingGuildId');
 
   const handleAccept = async () => {
     setLoading(true);
     setError(null);
 
     try {
+      // Seçilen sunucuyu cookie'ye kaydet
+      if (pendingGuildId) {
+        document.cookie = `selected_guild_id=${pendingGuildId}; path=/; max-age=86400; samesite=lax`;
+      }
+
       const response = await fetch('/api/discord/assign-role', { method: 'POST' });
       if (response.status === 401) {
         setError('Oturum süresi doldu. Lütfen tekrar giriş yapın.');
@@ -46,11 +55,12 @@ export default function DiscordRulesPage() {
       const verifyResponse = await fetch('/api/admin/verify');
       if (verifyResponse.ok) {
         const data = (await verifyResponse.json()) as { isAdmin: boolean };
-        router.replace(data.isAdmin ? '/admin' : '/dashboard');
+        // Rol verildi, şimdi sunucu seçtirmeye git
+        router.replace('/auth/select-server');
         return;
       }
 
-      router.replace('/dashboard');
+      router.replace('/auth/select-server');
     } catch {
       setError('Bir hata oluştu. Lütfen tekrar deneyin.');
       setLoading(false);
@@ -125,11 +135,33 @@ export default function DiscordRulesPage() {
               disabled={loading || !accepted}
               className="rounded-full bg-indigo-500 px-6 py-3 text-sm font-semibold text-white shadow-[0_12px_32px_rgba(99,102,241,0.45)] transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {loading ? 'Rol etkinleştiriliyor...' : 'Kuralları onayla'}
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <LuLoader className="h-4 w-4 animate-spin" />
+                  Rol etkinleştiriliyor...
+                </span>
+              ) : (
+                'Kuralları onayla'
+              )}
             </button>
           </div>
         </div>
       </main>
     </div>
+  );
+}
+
+export default function DiscordRulesPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-[#0b0d12] text-white">
+        <div className="text-center">
+          <LuLoader className="mx-auto mb-4 h-8 w-8 animate-spin text-indigo-400" />
+          <p className="text-sm text-white/70">Kurallar yükleniyor...</p>
+        </div>
+      </div>
+    }>
+      <RulesPageContent />
+    </Suspense>
   );
 }

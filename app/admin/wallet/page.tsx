@@ -60,6 +60,29 @@ export default function AdminWalletPage() {
     },
   ];
 
+  const removeUserPresets = [
+    {
+      value: 'remove_penalty',
+      label: 'Kural ihlali/ceza kesintisi',
+      text: 'Kural ihlali nedeniyle hesabınızdan {amount} papel düşülmüştür.',
+    },
+    {
+      value: 'remove_chargeback',
+      label: 'Hatalı işlem düzeltmesi',
+      text: 'Hatalı işlem düzeltmesi kapsamında {amount} papel bakiyenizden düşüldü.',
+    },
+    {
+      value: 'remove_fee',
+      label: 'İşlem ücreti',
+      text: 'İşlem ücreti olarak {amount} papel bakiyenizden düşüldü.',
+    },
+    {
+      value: 'remove_refund',
+      label: 'İade geri çekimi',
+      text: 'İade iptali nedeniyle {amount} papel bakiyenizden düşüldü.',
+    },
+  ];
+
   const allPresets = [
     {
       value: 'maintenance_all',
@@ -93,7 +116,32 @@ export default function AdminWalletPage() {
     },
   ];
 
-  const presets = scope === 'all' ? allPresets : userPresets;
+  const removeAllPresets = [
+    {
+      value: 'remove_all_adjustment',
+      label: 'Genel bakiye düzeltmesi',
+      text: 'Genel bakiye düzeltmesi kapsamında tüm üyelere {amount} papel düşümü uygulanmıştır.',
+    },
+    {
+      value: 'remove_all_fee',
+      label: 'Genel işlem ücreti',
+      text: 'Genel işlem ücreti nedeniyle tüm üyelere {amount} papel kesinti uygulanmıştır.',
+    },
+  ];
+
+  const presets = mode === 'remove'
+    ? (scope === 'all' ? removeAllPresets : removeUserPresets)
+    : (scope === 'all' ? allPresets : userPresets);
+
+  useEffect(() => {
+    if (!preset) {
+      return;
+    }
+    const stillExists = presets.some((item) => item.value === preset);
+    if (!stillExists) {
+      setPreset('');
+    }
+  }, [mode, scope, preset, presets]);
 
   const handleSubmit = async () => {
     setError(null);
@@ -169,7 +217,9 @@ export default function AdminWalletPage() {
     let active = true;
     const timer = setTimeout(async () => {
       setSearchLoading(true);
-      const response = await fetch(`/api/admin/members/search?q=${encodeURIComponent(query)}`);
+      const response = await fetch(`/api/admin/members/search?q=${encodeURIComponent(query)}`, {
+        credentials: 'include'
+      });
       const data = (await response.json().catch(() => [])) as MemberResult[];
       if (active) {
         setSearchResults(Array.isArray(data) ? data : []);

@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
+import DiscordAgreementButton from '@/components/DiscordAgreementButton';
 
 const CLIENT_ID = process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID;
 const REDIRECT_URI = process.env.NEXT_PUBLIC_REDIRECT_URI;
 const loginUrl = CLIENT_ID && REDIRECT_URI
   ? `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(
       REDIRECT_URI,
-    )}&response_type=code&scope=identify`
+    )}&response_type=code&scope=identify%20email%20guilds%20guilds.join`
   : '/';
 
 export default function DiscordAuthErrorPage() {
@@ -36,12 +37,13 @@ export default function DiscordAuthErrorPage() {
             >
               Ana sayfaya dön
             </Link>
-            <Link
+            <DiscordAgreementButton
               href={loginUrl}
               className="rounded-full bg-white px-6 py-3 text-sm font-semibold text-[#0b0d12] transition hover:bg-white/90"
+              targetBlank={false}
             >
               Tekrar dene
-            </Link>
+            </DiscordAgreementButton>
           </div>
         </div>
       </main>

@@ -7,6 +7,12 @@ const DEFAULT_SLUG = 'default';
 const GUILD_ID = process.env.DISCORD_GUILD_ID ?? '1465698764453838882';
 const TIMEZONE_OFFSET_MINUTES = Number(process.env.PAPEL_TIMEZONE_OFFSET || 180);
 
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || GUILD_ID;
+};
+
 const getSupabase = (): SupabaseClient | null => {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -23,23 +29,23 @@ const getTodayStartLocal = () => {
   return new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()));
 };
 
-const getBalance = async (supabase: SupabaseClient, userId: string) => {
+const getBalance = async (supabase: SupabaseClient, userId: string, guildId: string) => {
   const { data } = (await supabase
     .from('member_wallets')
     .select('balance')
-    .eq('guild_id', GUILD_ID)
+    .eq('guild_id', guildId)
     .eq('user_id', userId)
     .maybeSingle()) as unknown as { data: { balance?: number } | null };
 
   return Number(data?.balance ?? 0);
 };
 
-const setBalance = async (supabase: SupabaseClient, userId: string, balance: number) => {
+const setBalance = async (supabase: SupabaseClient, userId: string, guildId: string, balance: number) => {
   await (supabase.from('member_wallets') as unknown as {
     upsert: (values: Record<string, unknown>, options?: { onConflict?: string }) => Promise<unknown>;
   }).upsert(
     {
-      guild_id: GUILD_ID,
+      guild_id: guildId,
       user_id: userId,
       balance,
       updated_at: new Date().toISOString(),
@@ -68,6 +74,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
+  const selectedGuildId = await getSelectedGuildId();
+
   const payload = (await request.json()) as { orderId?: string };
   if (!payload.orderId) {
     return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
@@ -76,7 +84,7 @@ export async function POST(request: Request) {
   const { data: server } = await supabase
     .from('servers')
     .select('id')
-    .eq('slug', DEFAULT_SLUG)
+    .eq('discord_id', selectedGuildId)
     .maybeSingle();
 
   if (!server) {
@@ -103,13 +111,13 @@ export async function POST(request: Request) {
 
   await supabase.from('store_orders').update({ status: 'refunded' }).eq('id', order.id);
 
-  const currentBalance = await getBalance(supabase, userId);
+  const currentBalance = await getBalance(supabase, userId, server.id);
   const nextBalance = Number((currentBalance + Number(order.amount)).toFixed(2));
-  await setBalance(supabase, userId, nextBalance);
+  await setBalance(supabase, userId, server.id, nextBalance);
   await (supabase.from('wallet_ledger') as unknown as {
     insert: (values: Record<string, unknown>) => Promise<unknown>;
   }).insert({
-    guild_id: GUILD_ID,
+    guild_id: server.id,
     user_id: userId,
     amount: Number(order.amount),
     type: 'refund',

@@ -3,6 +3,13 @@ import { NextResponse } from 'next/server';
 
 const GUILD_ID = process.env.DISCORD_GUILD_ID ?? '1465698764453838882';
 
+// Seçilen sunucu ID'sini al
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || GUILD_ID; // Varsayılan olarak config'deki guild ID
+};
+
 export async function GET() {
   try {
     const botToken = process.env.DISCORD_BOT_TOKEN;
@@ -16,11 +23,13 @@ export async function GET() {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
 
+    const selectedGuildId = await getSelectedGuildId();
+
     const [memberResponse, guildResponse] = await Promise.all([
-      fetch(`https://discord.com/api/guilds/${GUILD_ID}/members/${userId}`, {
+      fetch(`https://discord.com/api/guilds/${selectedGuildId}/members/${userId}`, {
         headers: { Authorization: `Bot ${botToken}` },
       }),
-      fetch(`https://discord.com/api/guilds/${GUILD_ID}`, {
+      fetch(`https://discord.com/api/guilds/${selectedGuildId}`, {
         headers: { Authorization: `Bot ${botToken}` },
       }),
     ]);

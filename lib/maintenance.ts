@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
 
-const DEFAULT_SLUG = 'default';
 
 export const MAINTENANCE_KEYS = [
   'site',
@@ -33,22 +33,57 @@ const getSupabase = (): SupabaseClient | null => {
   return createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 };
 
+const DEFAULT_DEVELOPER_GUILD_ID = '1465698764453838882';
+const DEFAULT_DEVELOPER_ROLE_ID = '1467580199481639013';
+
+const getUserIdFromCookies = async () => {
+  try {
+    const cookieStore = await cookies();
+    return cookieStore.get('discord_user_id')?.value ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const isDeveloper = async (userId: string) => {
+  const botToken = process.env.DISCORD_BOT_TOKEN;
+  const roleId = process.env.DEVELOPER_ROLE_ID ?? DEFAULT_DEVELOPER_ROLE_ID;
+  const guildId = process.env.DEVELOPER_GUILD_ID ?? process.env.DISCORD_GUILD_ID ?? DEFAULT_DEVELOPER_GUILD_ID;
+
+  if (!botToken || !roleId || !guildId) {
+    return false;
+  }
+
+  const response = await fetch(`https://discord.com/api/guilds/${guildId}/members/${userId}`, {
+    headers: { Authorization: `Bot ${botToken}` },
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const member = (await response.json()) as { roles?: string[] };
+  return Boolean(member.roles?.includes(roleId));
+};
+
 const createDefaultFlags = (): MaintenanceMap =>
   MAINTENANCE_KEYS.reduce((acc, key) => {
     acc[key] = { key, is_active: false, reason: null, updated_by: null, updated_at: null };
     return acc;
   }, {} as MaintenanceMap);
 
-export const getMaintenanceFlags = async () => {
+export const getMaintenanceFlags = async (guildId?: string) => {
   const supabase = getSupabase();
   if (!supabase) {
     return null;
   }
 
+  const targetGuildId = guildId || process.env.DISCORD_GUILD_ID || '1465698764453838882';
+
   const { data: server } = await supabase
     .from('servers')
     .select('id')
-    .eq('slug', DEFAULT_SLUG)
+    .eq('discord_id', targetGuildId)
     .maybeSingle();
 
   if (!server) {
@@ -76,8 +111,16 @@ export const getMaintenanceFlags = async () => {
   return { flags, serverId: server.id };
 };
 
-export const checkMaintenance = async (keys: MaintenanceKey[]) => {
-  const data = await getMaintenanceFlags();
+export const checkMaintenance = async (keys: MaintenanceKey[], guildId?: string) => {
+  const userId = await getUserIdFromCookies();
+  if (userId) {
+    const developer = await isDeveloper(userId);
+    if (developer) {
+      return { blocked: false as const, key: null, reason: null };
+    }
+  }
+
+  const data = await getMaintenanceFlags(guildId);
   if (!data) {
     return { blocked: false as const, key: null, reason: null };
   }

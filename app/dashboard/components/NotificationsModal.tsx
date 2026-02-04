@@ -10,6 +10,7 @@ type NotificationsModalProps = {
   activeNotification: Notification | null;
   onClose: () => void;
   onOpenNotification: (item: Notification) => void;
+  renderNotificationBody: (body: string) => React.ReactNode;
 };
 
 export default function NotificationsModal({
@@ -19,6 +20,7 @@ export default function NotificationsModal({
   activeNotification,
   onClose,
   onOpenNotification,
+  renderNotificationBody,
 }: NotificationsModalProps) {
   if (!open) {
     return null;
@@ -78,7 +80,7 @@ export default function NotificationsModal({
                   {!item.is_read && <span className="h-2 w-2 rounded-full bg-indigo-400" />}
                   <span className="text-xs text-white/40">{new Date(item.created_at).toLocaleString('tr-TR')}</span>
                 </div>
-                <p className="mt-2 text-sm text-white/60">{item.body}</p>
+                <p className="mt-2 text-sm text-white/60">{renderNotificationBody(item.body)}</p>
                 {item.image_url && (
                   <div className="mt-2 rounded-xl border border-white/10 bg-black/20 p-2">
                     <Image

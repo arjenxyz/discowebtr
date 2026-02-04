@@ -11,9 +11,10 @@ type NotificationsDropdownProps = {
   loading: boolean;
   notifications: Notification[];
   onToggle: () => void;
-  onOpenModal: () => void;
   onOpenNotification: (item: Notification) => void;
   menuRef: RefObject<HTMLDivElement | null>;
+  onOpenModal?: () => void;
+  renderNotificationBody: (body: string) => React.ReactNode;
 };
 
 export default function NotificationsDropdown({
@@ -22,9 +23,10 @@ export default function NotificationsDropdown({
   loading,
   notifications,
   onToggle,
-  onOpenModal,
   onOpenNotification,
   menuRef,
+  onOpenModal,
+  renderNotificationBody,
 }: NotificationsDropdownProps) {
   return (
     <div ref={menuRef} className="relative">
@@ -45,15 +47,21 @@ export default function NotificationsDropdown({
         <div className="absolute right-0 z-50 mt-3 w-80 rounded-2xl border border-white/15 bg-[#0f1116] p-4 shadow-2xl">
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold">Bildirimler</p>
-            <button type="button" onClick={onOpenModal} className="text-xs text-indigo-300 transition hover:text-indigo-200">
-              Tümünü gör
-            </button>
+            {onOpenModal && (
+              <button
+                type="button"
+                onClick={() => onOpenModal()}
+                className="text-xs text-white/60 hover:text-white"
+              >
+                Tümünü Gör
+              </button>
+            )}
           </div>
-          <div className="mt-3 space-y-3">
+          <div className="mt-3 max-h-96 overflow-y-auto space-y-3 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
             {loading ? (
               <p className="text-xs text-white/50">Yükleniyor...</p>
             ) : notifications.length ? (
-              notifications.slice(0, 3).map((item) => (
+              notifications.map((item) => (
                 <button
                   key={item.id}
                   type="button"
@@ -78,7 +86,7 @@ export default function NotificationsDropdown({
                     </div>
                     {!item.is_read && <span className="h-2 w-2 rounded-full bg-indigo-400" />}
                   </div>
-                  <p className="mt-1 text-[11px] text-white/50 line-clamp-2">{item.body}</p>
+                  <p className="mt-1 text-[11px] text-white/50 line-clamp-2">{renderNotificationBody(item.body)}</p>
                   <span className="mt-2 inline-flex text-[10px] text-white/40">
                     {new Date(item.created_at).toLocaleString('tr-TR')}
                   </span>

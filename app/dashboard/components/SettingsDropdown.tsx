@@ -2,7 +2,7 @@
 
 // Link importunu sildik veya kalsın istiyorsan dursun ama aşağıda kullanmayacağız
 import Image from 'next/image';
-import { LuChevronDown, LuGift, LuLogOut, LuSend, LuSettings, LuTag } from 'react-icons/lu';
+import { LuChevronDown, LuCode, LuGift, LuLogOut, LuSend, LuSettings, LuShield, LuTag } from 'react-icons/lu';
 import type { RefObject } from 'react';
 
 type SettingsDropdownProps = {
@@ -10,6 +10,8 @@ type SettingsDropdownProps = {
   onToggle: () => void;
   onOpenSettings: () => void;
   onOpenTransfer: () => void;
+  onOpenPromotions: () => void;
+  onOpenDiscounts: () => void;
   logoutHref: string; // Bu prop artık teknik olarak gereksiz ama type hatası vermemesi için kalsın
   menuRef: RefObject<HTMLDivElement | null>;
   profile?: {
@@ -25,6 +27,8 @@ export default function SettingsDropdown({
   onToggle,
   onOpenSettings,
   onOpenTransfer,
+  onOpenPromotions,
+  onOpenDiscounts,
   menuRef,
   profile,
   profileLoading,
@@ -43,6 +47,14 @@ export default function SettingsDropdown({
       // Hata olsa bile kullanıcıyı dışarı atalım
       window.location.href = '/';
     }
+  };
+
+  const handleOpenAdmin = () => {
+    window.location.href = '/admin';
+  };
+
+  const handleOpenDeveloper = () => {
+    window.location.href = '/developer';
   };
 
   return (
@@ -83,7 +95,26 @@ export default function SettingsDropdown({
           <div className="mt-3 space-y-2">
             <button
               type="button"
-              onClick={onOpenSettings}
+              onClick={handleOpenAdmin}
+              className="flex w-full items-center gap-2 rounded-xl border border-white/5 bg-white/5 px-3 py-2 text-left text-xs text-white/70 transition hover:border-white/15 hover:text-white"
+            >
+              <LuShield className="h-3.5 w-3.5 text-indigo-300" />
+              Admin Paneli
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenDeveloper}
+              className="flex w-full items-center gap-2 rounded-xl border border-white/5 bg-white/5 px-3 py-2 text-left text-xs text-white/70 transition hover:border-white/15 hover:text-white"
+            >
+              <LuCode className="h-3.5 w-3.5 text-indigo-300" />
+              Developer Paneli
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onOpenPromotions();
+                onToggle();
+              }}
               className="flex w-full items-center gap-2 rounded-xl border border-white/5 bg-white/5 px-3 py-2 text-left text-xs text-white/70 transition hover:border-white/15 hover:text-white"
             >
               <LuGift className="h-3.5 w-3.5 text-indigo-300" />
@@ -91,7 +122,10 @@ export default function SettingsDropdown({
             </button>
             <button
               type="button"
-              onClick={onOpenSettings}
+              onClick={() => {
+                onOpenDiscounts();
+                onToggle();
+              }}
               className="flex w-full items-center gap-2 rounded-xl border border-white/5 bg-white/5 px-3 py-2 text-left text-xs text-white/70 transition hover:border-white/15 hover:text-white"
             >
               <LuTag className="h-3.5 w-3.5 text-indigo-300" />

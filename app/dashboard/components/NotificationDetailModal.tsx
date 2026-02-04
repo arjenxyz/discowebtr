@@ -6,9 +6,10 @@ import type { Notification } from '../types';
 type NotificationDetailModalProps = {
   notification: Notification | null;
   onClose: () => void;
+  renderNotificationBody: (body: string) => React.ReactNode;
 };
 
-export default function NotificationDetailModal({ notification, onClose }: NotificationDetailModalProps) {
+export default function NotificationDetailModal({ notification, onClose, renderNotificationBody }: NotificationDetailModalProps) {
   if (!notification) {
     return null;
   }
@@ -44,7 +45,7 @@ export default function NotificationDetailModal({ notification, onClose }: Notif
           </button>
         </div>
         <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
-          {notification.body}
+          {renderNotificationBody(notification.body)}
         </div>
         {notification.image_url && (
           <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-2">

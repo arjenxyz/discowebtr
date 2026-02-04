@@ -15,10 +15,16 @@ const getSupabase = () => {
   return createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 };
 
-const getTodayStartIso = () => {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
-  return start.toISOString();
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || GUILD_ID;
+};
+
+const getTodayStartIso = (): string => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today.toISOString();
 };
 
 export async function GET() {
@@ -41,10 +47,12 @@ export async function GET() {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
+  const selectedGuildId = await getSelectedGuildId();
+
   const { data: server } = await supabase
     .from('servers')
     .select('id,transfer_daily_limit,transfer_tax_rate')
-    .eq('slug', DEFAULT_SLUG)
+    .eq('discord_id', selectedGuildId)
     .maybeSingle();
 
   if (!server) {
@@ -54,14 +62,14 @@ export async function GET() {
   const { data: wallet } = await supabase
     .from('member_wallets')
     .select('balance')
-    .eq('guild_id', GUILD_ID)
+    .eq('guild_id', server.id)  // Use server.id (UUID) instead of selectedGuildId
     .eq('user_id', userId)
     .maybeSingle();
 
   const { data: sentToday } = await supabase
     .from('wallet_ledger')
     .select('amount')
-    .eq('guild_id', GUILD_ID)
+    .eq('guild_id', server.id)  // Use server.id (UUID) instead of selectedGuildId
     .eq('user_id', userId)
     .eq('type', 'transfer_out')
     .gte('created_at', getTodayStartIso());

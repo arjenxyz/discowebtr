@@ -6,6 +6,12 @@ import { checkMaintenance } from '@/lib/maintenance';
 const DEFAULT_SLUG = 'default';
 const GUILD_ID = process.env.DISCORD_GUILD_ID ?? '1465698764453838882';
 
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || GUILD_ID;
+};
+
 const getSupabase = (): SupabaseClient | null => {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -15,13 +21,13 @@ const getSupabase = (): SupabaseClient | null => {
   return createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 };
 
-const getSenderLabel = async (userId: string) => {
+const getSenderLabel = async (userId: string, guildId: string) => {
   const botToken = process.env.DISCORD_BOT_TOKEN;
   if (!botToken) {
     return userId;
   }
 
-  const response = await fetch(`https://discord.com/api/guilds/${GUILD_ID}/members/${userId}`, {
+  const response = await fetch(`https://discord.com/api/guilds/${guildId}/members/${userId}`, {
     headers: { Authorization: `Bot ${botToken}` },
   });
 
@@ -39,22 +45,22 @@ const getTodayStartIso = () => {
   return start.toISOString();
 };
 
-const getBalance = async (supabase: SupabaseClient, userId: string) => {
+const getBalance = async (supabase: SupabaseClient, userId: string, guildId: string) => {
   const { data } = (await supabase
     .from('member_wallets')
     .select('balance')
-    .eq('guild_id', GUILD_ID)
+    .eq('guild_id', guildId)
     .eq('user_id', userId)
     .maybeSingle()) as unknown as { data: { balance?: number } | null };
 
   return Number(data?.balance ?? 0);
 };
 
-const setBalance = async (supabase: SupabaseClient, userId: string, balance: number) => {
+const setBalance = async (supabase: SupabaseClient, userId: string, guildId: string, balance: number) => {
   await (supabase.from('member_wallets') as unknown as {
     upsert: (values: Record<string, unknown>, options?: { onConflict?: string }) => Promise<unknown>;
   }).upsert({
-    guild_id: GUILD_ID,
+    guild_id: guildId,
     user_id: userId,
     balance,
     updated_at: new Date().toISOString(),
@@ -64,6 +70,7 @@ const setBalance = async (supabase: SupabaseClient, userId: string, balance: num
 const addLedger = async (
   supabase: SupabaseClient,
   userId: string,
+  guildId: string,
   amount: number,
   type: 'transfer_in' | 'transfer_out' | 'transfer_tax',
   balanceAfter: number,
@@ -72,7 +79,7 @@ const addLedger = async (
   await (supabase.from('wallet_ledger') as unknown as {
     insert: (values: Record<string, unknown>) => Promise<unknown>;
   }).insert({
-    guild_id: GUILD_ID,
+    guild_id: guildId,
     user_id: userId,
     amount,
     type,
@@ -81,10 +88,11 @@ const addLedger = async (
   });
 };
 
-const insertNotification = async (supabase: SupabaseClient, userId: string, title: string, body: string) => {
+const insertNotification = async (supabase: SupabaseClient, userId: string, guildId: string, title: string, body: string) => {
   await (supabase.from('notifications') as unknown as {
     insert: (values: Record<string, unknown>) => Promise<unknown>;
   }).insert({
+    guild_id: guildId,
     title,
     body,
     type: 'mail',
@@ -113,6 +121,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
+  const selectedGuildId = await getSelectedGuildId();
+
   const payload = (await request.json()) as { recipientId?: string; amount?: number };
   if (!payload.recipientId || typeof payload.amount !== 'number') {
     return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
@@ -128,8 +138,8 @@ export async function POST(request: Request) {
 
   const { data: server } = await supabase
     .from('servers')
-    .select('transfer_daily_limit,transfer_tax_rate')
-    .eq('slug', DEFAULT_SLUG)
+    .select('id,transfer_daily_limit,transfer_tax_rate')
+    .eq('discord_id', selectedGuildId)
     .maybeSingle();
 
   if (!server) {
@@ -139,7 +149,7 @@ export async function POST(request: Request) {
   const { data: sentToday } = await supabase
     .from('wallet_ledger')
     .select('amount')
-    .eq('guild_id', GUILD_ID)
+    .eq('guild_id', server.id)
     .eq('user_id', userId)
     .eq('type', 'transfer_out')
     .gte('created_at', getTodayStartIso());
@@ -153,37 +163,38 @@ export async function POST(request: Request) {
   const taxAmount = Number((payload.amount * taxRate).toFixed(2));
   const totalDebit = Number((payload.amount + taxAmount).toFixed(2));
 
-  const senderBalance = await getBalance(supabase, userId);
+  const senderBalance = await getBalance(supabase, userId, server.id);
   if (senderBalance < totalDebit) {
     return NextResponse.json({ error: 'insufficient_funds' }, { status: 400 });
   }
 
-  const receiverBalance = await getBalance(supabase, payload.recipientId);
+  const receiverBalance = await getBalance(supabase, payload.recipientId, server.id);
 
   const newSenderBalance = Number((senderBalance - totalDebit).toFixed(2));
   const newReceiverBalance = Number((receiverBalance + payload.amount).toFixed(2));
 
-  await setBalance(supabase, userId, newSenderBalance);
-  await addLedger(supabase, userId, payload.amount, 'transfer_out', newSenderBalance, {
+  await setBalance(supabase, userId, server.id, newSenderBalance);
+  await addLedger(supabase, userId, server.id, payload.amount, 'transfer_out', newSenderBalance, {
     recipientId: payload.recipientId,
     tax: taxAmount,
   });
   if (taxAmount > 0) {
-    await addLedger(supabase, userId, taxAmount, 'transfer_tax', newSenderBalance, {
+    await addLedger(supabase, userId, server.id, taxAmount, 'transfer_tax', newSenderBalance, {
       recipientId: payload.recipientId,
     });
   }
 
-  await setBalance(supabase, payload.recipientId, newReceiverBalance);
-  await addLedger(supabase, payload.recipientId, payload.amount, 'transfer_in', newReceiverBalance, {
+  await setBalance(supabase, payload.recipientId, server.id, newReceiverBalance);
+  await addLedger(supabase, payload.recipientId, server.id, payload.amount, 'transfer_in', newReceiverBalance, {
     senderId: userId,
   });
 
   await insertNotification(
     supabase,
     payload.recipientId,
+    server.id,
     'Papel transferi aldınız',
-    `Size ${payload.amount} papel gönderildi. Gönderen: ${await getSenderLabel(userId)}`,
+    `Size ${payload.amount} papel gönderildi. Gönderen: ${await getSenderLabel(userId, selectedGuildId)}`,
   );
 
   return NextResponse.json({

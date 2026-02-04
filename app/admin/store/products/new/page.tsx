@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+
+export const dynamic = 'force-dynamic';
 
 type StoreItem = {
   id: string;
@@ -20,7 +22,7 @@ type RoleOption = {
   color: number;
 };
 
-export default function AdminStoreProductCreatePage() {
+function AdminStoreProductCreatePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get('edit');
@@ -77,7 +79,9 @@ export default function AdminStoreProductCreatePage() {
     }
 
     const timer = setTimeout(async () => {
-      const response = await fetch(`/api/admin/roles?query=${encodeURIComponent(roleId)}&limit=5`);
+      const response = await fetch(`/api/admin/roles?query=${encodeURIComponent(roleId)}&limit=5`, {
+        credentials: 'include'
+      });
       if (response.ok) {
         const data = (await response.json()) as RoleOption[];
         const exact = data.find((item) => item.id === roleId);
@@ -101,7 +105,9 @@ export default function AdminStoreProductCreatePage() {
       setRoleLoading(true);
       setRoleError(null);
 
-      const response = await fetch(`/api/admin/roles?query=${encodeURIComponent(roleQuery)}&limit=20`);
+      const response = await fetch(`/api/admin/roles?query=${encodeURIComponent(roleQuery)}&limit=20`, {
+        credentials: 'include'
+      });
       if (!response.ok) {
         setRoleError('Roller alınamadı.');
         setRoleResults([]);
@@ -134,6 +140,7 @@ export default function AdminStoreProductCreatePage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      credentials: 'include'
     });
 
     if (!response.ok) {
@@ -436,5 +443,13 @@ export default function AdminStoreProductCreatePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AdminStoreProductCreatePage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <AdminStoreProductCreatePageContent />
+    </Suspense>
   );
 }

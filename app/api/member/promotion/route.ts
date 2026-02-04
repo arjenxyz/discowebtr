@@ -2,9 +2,16 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { checkMaintenance } from '@/lib/maintenance';
+import { logWebEvent } from '@/lib/serverLogger';
 
 const DEFAULT_SLUG = 'default';
 const GUILD_ID = process.env.DISCORD_GUILD_ID ?? '1465698764453838882';
+
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || GUILD_ID; // Fallback to default
+};
 
 const getSupabase = () => {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -15,23 +22,23 @@ const getSupabase = () => {
   return createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 };
 
-const getBalance = async (supabase: SupabaseClient, userId: string) => {
+const getBalance = async (supabase: SupabaseClient, userId: string, serverId: string) => {
   const { data } = (await supabase
     .from('member_wallets')
     .select('balance')
-    .eq('guild_id', GUILD_ID)
+    .eq('guild_id', serverId)
     .eq('user_id', userId)
     .maybeSingle()) as unknown as { data: { balance?: number } | null };
 
   return Number(data?.balance ?? 0);
 };
 
-const setBalance = async (supabase: SupabaseClient, userId: string, balance: number) => {
+const setBalance = async (supabase: SupabaseClient, userId: string, serverId: string, balance: number) => {
   await (supabase.from('member_wallets') as unknown as {
     upsert: (values: Record<string, unknown>, options?: { onConflict?: string }) => Promise<unknown>;
   }).upsert(
     {
-      guild_id: GUILD_ID,
+      guild_id: serverId,
       user_id: userId,
       balance,
       updated_at: new Date().toISOString(),
@@ -40,11 +47,11 @@ const setBalance = async (supabase: SupabaseClient, userId: string, balance: num
   );
 };
 
-const addLedger = async (supabase: SupabaseClient, userId: string, amount: number, balanceAfter: number, promoId: string) => {
+const addLedger = async (supabase: SupabaseClient, userId: string, serverId: string, amount: number, balanceAfter: number, promoId: string) => {
   await (supabase.from('wallet_ledger') as unknown as {
     insert: (values: Record<string, unknown>) => Promise<unknown>;
   }).insert({
-    guild_id: GUILD_ID,
+    guild_id: serverId,
     user_id: userId,
     amount,
     type: 'promotion',
@@ -73,6 +80,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
+  const selectedGuildId = await getSelectedGuildId();
+
   const payload = (await request.json()) as { code?: string };
   const code = payload.code?.trim();
   if (!code) {
@@ -82,7 +91,7 @@ export async function POST(request: Request) {
   const { data: server } = await supabase
     .from('servers')
     .select('id')
-    .eq('slug', DEFAULT_SLUG)
+    .eq('discord_id', selectedGuildId)
     .maybeSingle();
 
   if (!server) {
@@ -108,7 +117,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'limit_reached' }, { status: 400 });
   }
 
-  const currentBalance = await getBalance(supabase, userId);
+  const currentBalance = await getBalance(supabase, userId, server.id);
   const packageAmount = Number(promo.value);
   const newBalance = Number((currentBalance + packageAmount).toFixed(2));
 
@@ -121,8 +130,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'update_failed' }, { status: 500 });
   }
 
-  await setBalance(supabase, userId, newBalance);
-  await addLedger(supabase, userId, packageAmount, newBalance, promo.id);
+  await setBalance(supabase, userId, server.id, newBalance);
+  await addLedger(supabase, userId, server.id, packageAmount, newBalance, promo.id);
+
+  await logWebEvent(request, {
+    event: 'store_promo_redeem',
+    status: 'success',
+    userId,
+    guildId: selectedGuildId,
+    metadata: {
+      promoId: promo.id,
+      code: promo.code,
+      value: promo.value,
+      maxUses: promo.max_uses ?? null,
+      usedCount: (promo.used_count ?? 0) + 1,
+      expiresAt: promo.expires_at ?? null,
+      balanceAfter: newBalance,
+    },
+  });
 
   return NextResponse.json({ code: promo.code, amount: packageAmount, balance: newBalance });
 }

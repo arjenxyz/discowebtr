@@ -2,10 +2,10 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import { LuChevronRight, LuClock, LuHouse, LuReceipt, LuStore } from 'react-icons/lu';
+import { LuChevronRight, LuClock, LuHouse, LuMail, LuReceipt, LuStore } from 'react-icons/lu';
 import type { MemberProfile } from '../types';
 
-type Section = 'overview' | 'store' | 'transactions' | 'tracking' | 'notifications' | 'profile' | 'settings';
+type Section = 'overview' | 'store' | 'transactions' | 'tracking' | 'notifications' | 'profile' | 'settings' | 'mail';
 
 type SidebarNavProps = {
   effectiveSection: Section;
@@ -106,7 +106,7 @@ export default function SidebarNav({
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.3em] text-white/40">Sunucu</p>
                   <p className="text-sm font-semibold text-white">
-                    {profile?.guildName ?? 'Disc Nexus'}
+                    {profile?.guildName ?? 'Veri Merkezi'}
                   </p>
                 </div>
               </div>
@@ -170,6 +170,16 @@ export default function SidebarNav({
                   <LuClock className="h-5 w-5" />
                 </span>
                 {!collapsed && <span>Mağaza Takip</span>}
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigate('mail')}
+                className={menuItemClass(effectiveSection === 'mail', collapsed)}
+              >
+                <span className={iconWrapClass(effectiveSection === 'mail', collapsed)}>
+                  <LuMail className="h-5 w-5" />
+                </span>
+                {!collapsed && <span>Mail</span>}
               </button>
             </div>
           )}

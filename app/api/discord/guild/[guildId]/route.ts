@@ -1,0 +1,36 @@
+import { NextResponse } from 'next/server';
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ guildId: string }> }
+) {
+  try {
+    const botToken = process.env.DISCORD_BOT_TOKEN;
+    if (!botToken) {
+      return NextResponse.json({ error: 'Bot token not configured' }, { status: 500 });
+    }
+
+    const { guildId } = await params;
+
+    // Discord API'den sunucu bilgilerini al
+    const response = await fetch(`https://discord.com/api/guilds/${guildId}`, {
+      headers: { Authorization: `Bot ${botToken}` },
+    });
+
+    if (!response.ok) {
+      return NextResponse.json({ error: 'Failed to fetch guild' }, { status: response.status });
+    }
+
+    const guild = await response.json();
+
+    return NextResponse.json({
+      id: guild.id,
+      name: guild.name,
+      icon: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png` : null,
+      owner_id: guild.owner_id ?? null,
+    });
+  } catch (error) {
+    console.error('Error fetching Discord guild:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}

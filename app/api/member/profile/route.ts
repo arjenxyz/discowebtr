@@ -3,7 +3,11 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { checkMaintenance } from '@/lib/maintenance';
 
-const GUILD_ID = process.env.DISCORD_GUILD_ID ?? '1465698764453838882';
+const getSelectedGuildId = async (): Promise<string> => {
+  const cookieStore = await cookies();
+  const selectedGuildId = cookieStore.get('selected_guild_id')?.value;
+  return selectedGuildId || process.env.DISCORD_GUILD_ID || '1465698764453838882';
+};
 
 const getSupabase = () => {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -35,14 +39,16 @@ export async function GET() {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
 
+    const selectedGuildId = await getSelectedGuildId();
+
     const [memberResponse, rolesResponse, guildResponse] = await Promise.all([
-      fetch(`https://discord.com/api/guilds/${GUILD_ID}/members/${userId}`, {
+      fetch(`https://discord.com/api/guilds/${selectedGuildId}/members/${userId}`, {
         headers: { Authorization: `Bot ${botToken}` },
       }),
-      fetch(`https://discord.com/api/guilds/${GUILD_ID}/roles`, {
+      fetch(`https://discord.com/api/guilds/${selectedGuildId}/roles`, {
         headers: { Authorization: `Bot ${botToken}` },
       }),
-      fetch(`https://discord.com/api/guilds/${GUILD_ID}`, {
+      fetch(`https://discord.com/api/guilds/${selectedGuildId}`, {
         headers: { Authorization: `Bot ${botToken}` },
       }),
     ]);
@@ -71,12 +77,25 @@ export async function GET() {
     const supabase = getSupabase();
     let about: string | null = null;
 
+    let serverId = selectedGuildId; // fallback
+    if (supabase) {
+      const { data: server } = await supabase
+        .from('servers')
+        .select('id')
+        .eq('discord_id', selectedGuildId)
+        .maybeSingle();
+      
+      if (server) {
+        serverId = server.id;
+      }
+    }
+
     if (supabase) {
       const { data } = await supabase
         .from('member_profiles')
         .select('about')
         .eq('user_id', member.user.id)
-        .eq('guild_id', GUILD_ID)
+        .eq('guild_id', serverId)
         .maybeSingle();
 
       about = data?.about ?? null;
@@ -128,9 +147,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'missing_service_role' }, { status: 500 });
     }
 
+    const selectedGuildId = await getSelectedGuildId();
+
+    const { data: server } = await supabase
+      .from('servers')
+      .select('id')
+      .eq('discord_id', selectedGuildId)
+      .maybeSingle();
+
+    const serverId = server?.id || selectedGuildId;
+
     const { error } = await supabase.from('member_profiles').upsert(
       {
-        guild_id: GUILD_ID,
+        guild_id: serverId,
         user_id: userId,
         about: aboutValue.length ? aboutValue : null,
         updated_at: new Date().toISOString(),
