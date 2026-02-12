@@ -32,8 +32,19 @@ export async function POST(request: Request) {
     const clientSecret = process.env.DISCORD_CLIENT_SECRET;
     // Prefer the more explicit env var if present (ensure exact match with Discord app)
     const redirectUri = process.env.NEXT_PUBLIC_DISCORD_REDIRECT_URI ?? process.env.NEXT_PUBLIC_REDIRECT_URI;
-    // Log redirectUri for debugging (will be recorded by logWebEvent)
-    console.log('Using redirectUri for token exchange:', redirectUri);
+    // Debug: log presence of values (DO NOT log secrets themselves)
+    try {
+      console.log('exchange debug:', {
+        codePresent: !!code,
+        clientIdPresent: !!clientId,
+        hasClientSecret: !!clientSecret,
+        redirectUri: redirectUri ?? null,
+        hasBotToken: !!process.env.DISCORD_BOT_TOKEN,
+      });
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (e) {
+      // ignore logging failures
+    }
     const botToken = process.env.DISCORD_BOT_TOKEN;
 
     if (!code || !clientId || !clientSecret || !redirectUri || !botToken) {
