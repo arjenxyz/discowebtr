@@ -37,8 +37,28 @@ export default function CuteNavbar() {
   const [isLogoHovered, setIsLogoHovered] = useState(false);
 
   // --- DISCORD OAUTH LINK ---
-  // Burası senin verdiğin orijinal link
-  const DISCORD_LOGIN_URL = "https://discord.com/oauth2/authorize?client_id=1465696408656023698&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2F%2Fauth%2Fcallback&scope=guilds+identify";
+  const DISCORD_CLIENT_ID = process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID ?? process.env.DISCORD_CLIENT_ID ?? '';
+  const REDIRECT_RAW = process.env.NEXT_PUBLIC_REDIRECT_URI ?? process.env.NEXT_PUBLIC_DISCORD_REDIRECT_URI ?? '';
+
+  // Normalize redirect URI: prefer configured env, otherwise derive from current origin.
+  const getAuthRedirect = () => {
+    if (REDIRECT_RAW && REDIRECT_RAW.trim() !== '') {
+      // remove trailing slashes to avoid double // when appending
+      return REDIRECT_RAW.replace(/\/+$|\/+$/g, '').replace(/\/+$/g, '').replace(/\/+$/*/, '')
+        .replace(/\/+$/(""), "");
+    }
+    if (typeof window !== 'undefined') {
+      return window.location.origin;
+    }
+    return '';
+  };
+
+  const baseRedirect = getAuthRedirect();
+  const authRedirect = baseRedirect ? `${baseRedirect.replace(/\/+$/,'')}/auth/callback` : '';
+
+  const DISCORD_LOGIN_URL = DISCORD_CLIENT_ID && authRedirect
+    ? `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(authRedirect)}&response_type=code&scope=identify%20guilds`
+    : '/';
 
   // Mobil menü scroll kilidi
   useEffect(() => {
