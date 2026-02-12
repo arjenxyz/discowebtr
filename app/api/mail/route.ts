@@ -137,8 +137,8 @@ export async function GET() {
     .eq('user_id', userId)
     .in('mail_id', ids);
 
-  const readSet = new Set((reads ?? []).map((entry) => entry.mail_id));
-  const starSet = new Set((stars ?? []).map((entry) => entry.mail_id));
+  const readSet = new Set(((reads ?? []) as Array<{ mail_id: string }>).map((entry) => entry.mail_id));
+  const starSet = new Set(((stars ?? []) as Array<{ mail_id: string }>).map((entry) => entry.mail_id));
   const unescapeHtml = (s: string) =>
     String(s)
       .replace(/&lt;/g, '<')

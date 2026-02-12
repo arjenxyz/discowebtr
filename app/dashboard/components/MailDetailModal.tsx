@@ -75,6 +75,7 @@ const SENDER_CONFIG = {
 type MailDetailModalProps = {
   mail: MailItem | null;
   onClose: () => void;
+  renderBody?: (body: string) => React.ReactNode;
 };
 
 const isVideoUrl = (url: string) => {

@@ -227,14 +227,14 @@ export async function POST(request: Request) {
     // Determine role positions and bot permissions
     const targetPos = Number(targetRole.position ?? 0);
     let botMaxPos = -1;
-    let botPerms = 0n;
+    let botPerms = BigInt(0);
     if (botMember && Array.isArray(botMember.roles)) {
       for (const rId of botMember.roles) {
         const r = (rolesList || []).find((x: any) => String(x.id) === String(rId));
         if (r) {
           botMaxPos = Math.max(botMaxPos, Number(r.position ?? 0));
           try {
-            botPerms = BigInt(botPerms) | BigInt(r.permissions || 0);
+            botPerms = botPerms | BigInt(r.permissions || 0);
           } catch (e) {}
         }
       }

@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import type { MemberProfile, OverviewStats } from '../types';
+import type { MemberProfile, OverviewStats, OrderStats } from '../types';
 
 type OverviewSectionProps = {
   overviewLoading: boolean;
@@ -10,6 +10,7 @@ type OverviewSectionProps = {
   profileError: string | null;
   unauthorized: boolean;
   profile: MemberProfile | null;
+  orderStats?: OrderStats | null;
   renderPapelAmount: (value: number) => React.ReactNode;
   formatRoleColor: (color: number) => string;
 };

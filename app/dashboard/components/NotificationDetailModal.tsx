@@ -10,6 +10,7 @@ import type { Notification } from '../types';
 type NotificationDetailModalProps = {
   notification: Notification | null;
   onClose: () => void;
+  renderNotificationBody?: (body: string) => React.ReactNode;
 };
 
 export default function NotificationDetailModal({ 
