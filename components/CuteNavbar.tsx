@@ -43,9 +43,8 @@ export default function CuteNavbar() {
   // Normalize redirect URI: prefer configured env, otherwise derive from current origin.
   const getAuthRedirect = () => {
     if (REDIRECT_RAW && REDIRECT_RAW.trim() !== '') {
-      // remove trailing slashes to avoid double // when appending
-      return REDIRECT_RAW.replace(/\/+$|\/+$/g, '').replace(/\/+$/g, '').replace(/\/+$/*/, '')
-        .replace(/\/+$/(""), "");
+      // remove trailing slashes
+      return REDIRECT_RAW.replace(/\/+$/g, '');
     }
     if (typeof window !== 'undefined') {
       return window.location.origin;
@@ -54,7 +53,12 @@ export default function CuteNavbar() {
   };
 
   const baseRedirect = getAuthRedirect();
-  const authRedirect = baseRedirect ? `${baseRedirect.replace(/\/+$/,'')}/auth/callback` : '';
+  // If env already points to the full callback path, use it as-is; otherwise append /auth/callback
+  const authRedirect = baseRedirect
+    ? baseRedirect.endsWith('/auth/callback')
+      ? baseRedirect
+      : `${baseRedirect.replace(/\/+$/,'')}/auth/callback`
+    : '';
 
   const DISCORD_LOGIN_URL = DISCORD_CLIENT_ID && authRedirect
     ? `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(authRedirect)}&response_type=code&scope=identify%20guilds`
