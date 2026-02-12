@@ -95,12 +95,8 @@ export default function CuteNavbar() {
 
     window.addEventListener('storage', handleStorageChange);
 
-    // Also check periodically in case logout happens in the same tab
-    const interval = setInterval(checkLoginStatus, 1000);
-
     return () => {
       window.removeEventListener('storage', handleStorageChange);
-      clearInterval(interval);
     };
   }, []);
 
