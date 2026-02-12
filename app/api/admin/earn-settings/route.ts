@@ -121,20 +121,20 @@ export async function PUT(request: Request) {
     boost: { up: "🚀 Boost Güçlendirmesi: Ödüller arttı!", down: "🚀 Boost Güncellemesi: Düzenleme yapıldı.", same: "🚀 Boost Sabit: Aynı kaldı." }
   };
 
-  const check = (key: string, label: string, group: 'general' | 'tag' | 'boost') => {
-    const oldV = Number(oldData?.[key] ?? 0);
-    // Only allow numeric keys to be checked
-    const numericKeys = [
-      'earn_per_message',
-      'earn_per_voice_minute',
-      'tag_bonus_message',
-      'tag_bonus_voice',
-      'booster_bonus_message',
-      'booster_bonus_voice'
-    ] as const;
+  const numericKeys: Array<keyof ServerUpdate> = [
+    'earn_per_message',
+    'earn_per_voice_minute',
+    'tag_bonus_message',
+    'tag_bonus_voice',
+    'booster_bonus_message',
+    'booster_bonus_voice'
+  ];
+
+  const check = (key: keyof ServerUpdate, label: string, group: 'general' | 'tag' | 'boost') => {
+    const oldV = Number(oldData?.[key as string] ?? 0);
     let newV = 0;
-    if (numericKeys.includes(key as any)) {
-      newV = Number((updateObj as any)[key]);
+    if (numericKeys.includes(key)) {
+      newV = Number(updateObj[key] as number ?? 0);
     }
     if (oldV !== newV) {
       const dir: 'up' | 'down' = newV > oldV ? 'up' : 'down';

@@ -24,6 +24,7 @@ export type MailItem = {
   author_name?: string | null;
   author_avatar_url?: string | null;
   is_read?: boolean;
+  is_starred?: boolean;
   image_url?: string | null;
   details_url?: string | null;
 };

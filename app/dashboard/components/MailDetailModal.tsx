@@ -147,16 +147,23 @@ export default function MailDetailModal({ mail, onClose }: MailDetailModalProps)
         }
       })();
     } else {
-      setRecipient(null);
+      // schedule clearing the recipient asynchronously to avoid synchronous setState inside effect
+      try {
+        queueMicrotask(() => { if (mounted) setRecipient(null); });
+      } catch {
+        setTimeout(() => { if (mounted) setRecipient(null); }, 0);
+      }
     }
     return () => { mounted = false; };
-  }, [mail?.user_id]);
+  }, [mail?.user_id, mail]);
 
   if (!mail) return null;
 
   const sender = SENDER_CONFIG[mail.category as keyof typeof SENDER_CONFIG] || SENDER_CONFIG.order;
-  // avatarUrl may be missing from some sender entries; access safely
-  const avatarUrl = (sender as any).avatarUrl as string | undefined;
+  // avatarUrl may be missing from some sender entries; access safely with proper typing
+  type SenderType = typeof SENDER_CONFIG[keyof typeof SENDER_CONFIG];
+  const senderTyped = sender as SenderType;
+  const avatarUrl = (senderTyped as { avatarUrl?: string }).avatarUrl;
 
   const renderEmailBody = (body: string, category: string) => {
     if (!body) return null;
@@ -460,9 +467,14 @@ export default function MailDetailModal({ mail, onClose }: MailDetailModalProps)
                     {/* Avatar: prefer image URL if provided, otherwise show emoji/avatar text. */}
                     <div className={`flex-shrink-0 w-10 h-10 rounded-full overflow-hidden flex items-center justify-center text-lg font-medium ${avatarUrl ? '' : 'bg-blue-600 text-white'}`}>
                       {avatarUrl ? (
-                        // Render image avatar (from public/ or absolute URL)
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={avatarUrl} alt={`${sender.name} avatar`} className="w-10 h-10 object-cover" />
+                        <Image
+                          src={avatarUrl}
+                          alt={`${sender.name} avatar`}
+                          width={40}
+                          height={40}
+                          className="w-10 h-10 object-cover"
+                          unoptimized
+                        />
                       ) : (
                         <span className="select-none">{sender.avatar}</span>
                       )}
@@ -537,7 +549,7 @@ export default function MailDetailModal({ mail, onClose }: MailDetailModalProps)
                     {recipient ? (
                       <div className="flex items-center gap-2">
                         {recipient.avatar ? (
-                          <img src={recipient.avatar} alt={recipient.username} className="w-6 h-6 rounded-full" />
+                          <Image src={recipient.avatar} alt={recipient.username} width={24} height={24} className="w-6 h-6 rounded-full" unoptimized />
                         ) : (
                           <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs">{recipient.username?.slice(0,1)?.toUpperCase()}</div>
                         )}

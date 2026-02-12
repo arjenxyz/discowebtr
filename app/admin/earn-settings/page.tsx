@@ -21,6 +21,7 @@ type EarnSettings = {
   earn_per_voice_minute: number;
   voice_earn_enabled: boolean;
   verify_role_id: string | null;
+  tag_configured?: boolean;
   tag_required: boolean;
   tag_bonus_message: number;
   tag_bonus_voice: number;
