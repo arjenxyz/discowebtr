@@ -38,7 +38,7 @@ export async function POST(request: Request) {
         event: 'discord_exchange_failed',
         status: 'missing_env_or_code',
       });
-      return NextResponse.json({ status: 'error' }, { status: 400 });
+      return NextResponse.json({ status: 'error', reason: 'missing_env_or_code' }, { status: 400 });
     }
 
     const body = new URLSearchParams({
@@ -57,11 +57,18 @@ export async function POST(request: Request) {
     });
 
     if (!tokenResponse.ok) {
+      let discordBody = null;
+      try {
+        discordBody = await tokenResponse.json();
+      } catch {
+        try { discordBody = await tokenResponse.text(); } catch { discordBody = null; }
+      }
       await logWebEvent(request, {
         event: 'discord_exchange_failed',
         status: 'token_exchange_failed',
+        metadata: { discordStatus: tokenResponse.status, discordBody },
       });
-      return NextResponse.json({ status: 'error' }, { status: 401 });
+      return NextResponse.json({ status: 'error', reason: 'token_exchange_failed', discordStatus: tokenResponse.status, discordBody }, { status: 401 });
     }
 
     const tokenData = (await tokenResponse.json()) as {
@@ -76,11 +83,18 @@ export async function POST(request: Request) {
     });
 
     if (!userResponse.ok) {
+      let discordBody = null;
+      try {
+        discordBody = await userResponse.json();
+      } catch {
+        try { discordBody = await userResponse.text(); } catch { discordBody = null; }
+      }
       await logWebEvent(request, {
         event: 'discord_exchange_failed',
         status: 'user_fetch_failed',
+        metadata: { discordStatus: userResponse.status, discordBody },
       });
-      return NextResponse.json({ status: 'error' }, { status: 401 });
+      return NextResponse.json({ status: 'error', reason: 'user_fetch_failed', discordStatus: userResponse.status, discordBody }, { status: 401 });
     }
 
     const user = (await userResponse.json()) as {
@@ -97,11 +111,18 @@ export async function POST(request: Request) {
     });
 
     if (!guildsResponse.ok) {
+      let discordBody = null;
+      try {
+        discordBody = await guildsResponse.json();
+      } catch {
+        try { discordBody = await guildsResponse.text(); } catch { discordBody = null; }
+      }
       await logWebEvent(request, {
         event: 'discord_exchange_failed',
         status: 'guilds_fetch_failed',
+        metadata: { discordStatus: guildsResponse.status, discordBody },
       });
-      return NextResponse.json({ status: 'error' }, { status: 401 });
+      return NextResponse.json({ status: 'error', reason: 'guilds_fetch_failed', discordStatus: guildsResponse.status, discordBody }, { status: 401 });
     }
 
     const guilds = (await guildsResponse.json()) as Array<{
@@ -194,6 +215,15 @@ export async function POST(request: Request) {
               });
             } else {
               console.log(`Discord API isteği başarısız: Sunucu=${server.name}, Kullanıcı=${user.id}, Status=${memberResponse.status}`);
+              let memberBody = null;
+              try { memberBody = await memberResponse.json(); } catch { try { memberBody = await memberResponse.text(); } catch {} }
+              await logWebEvent(request, {
+                event: 'discord_exchange_failed',
+                status: 'member_fetch_failed',
+                userId: user.id,
+                guildId: server.discord_id,
+                metadata: { status: memberResponse.status, body: memberBody },
+              });
             }
           } catch (error) {
             console.log(`Sunucu ${server.name} kontrol edilemedi:`, error);
@@ -366,11 +396,12 @@ export async function POST(request: Request) {
     });
 
     return response;
-  } catch {
+  } catch (err) {
     await logWebEvent(request, {
       event: 'discord_exchange_failed',
       status: 'unhandled_exception',
+      metadata: { error: String(err) },
     });
-    return NextResponse.json({ status: 'error' }, { status: 500 });
+    return NextResponse.json({ status: 'error', reason: 'unhandled_exception' }, { status: 500 });
   }
 }

@@ -40,6 +40,16 @@ function DiscordAuthCallbackContent() {
         });
 
         if (!response.ok) {
+          let body: any = null;
+          try {
+            body = await response.json();
+          } catch {
+            try { body = await response.text(); } catch { body = null; }
+          }
+          console.error('Discord exchange failed', { status: response.status, body });
+          try {
+            localStorage.setItem('oauth_debug', JSON.stringify({ time: new Date().toISOString(), status: response.status, body }));
+          } catch {}
           router.replace('/auth/error');
           return;
         }
