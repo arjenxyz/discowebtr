@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -24,6 +23,7 @@ import type {
   StoreItem,
   MailItem,
   PurchaseFeedback,
+  Section,
 } from './types';
 
 export default function DashboardPage() {
@@ -44,14 +44,13 @@ export default function DashboardPage() {
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
   const [storeItemsLoading, setStoreItemsLoading] = useState(true);
-  const [activeSection, setActiveSection] = useState<'overview' | 'store' | 'notifications' | 'profile' | 'settings' | 'mail'>(
-    'overview',
-  );
-  const searchParams = useSearchParams();
+  const [activeSection, setActiveSection] = useState<Section>('overview');
+  const [searchParams, setSearchParams] = useState<URLSearchParams | null>(null);
 
   useEffect(() => {
     try {
-      const s = searchParams.get('section');
+      if (typeof window !== 'undefined') setSearchParams(new URLSearchParams(window.location.search));
+      const s = searchParams?.get('section');
       if (s === 'mail') setActiveSection('mail');
     } catch {}
   }, [searchParams]);

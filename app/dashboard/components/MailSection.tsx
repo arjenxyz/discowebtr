@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import MailDetailModal from './MailDetailModal';
 import type { MailItem } from '../types';
 import { 
@@ -87,7 +87,7 @@ export default function MailSection({
   const [selectedMail, setSelectedMail] = useState<MailItem | null>(null);
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const [searchParams, setSearchParams] = useState<URLSearchParams | null>(null);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [showSettings, setShowSettings] = useState(false);
@@ -111,6 +111,11 @@ export default function MailSection({
   // Open modal when route contains /dashboard/mail and id search param is present
   useEffect(() => {
     try {
+      // next/navigation's useSearchParams can cause a CSR bailout during prerendering.
+      // Instead, read the location search on the client when pathname changes.
+      if (typeof window !== 'undefined') {
+        setSearchParams(new URLSearchParams(window.location.search));
+      }
       const id = searchParams?.get('id');
       const path = pathname ?? '';
       if (path.startsWith('/dashboard/mail')) {
@@ -120,7 +125,7 @@ export default function MailSection({
         }
       }
     } catch {}
-  }, [pathname, searchParams, items]);
+  }, [pathname, /* intentionally include items so opening works */ items, searchParams]);
 
   // Temporarily set UI theme in component state. Persist only when user clicks "Kaydet".
   const applyTheme = (t: 'light' | 'dark') => {
