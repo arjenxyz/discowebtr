@@ -61,7 +61,7 @@ export default function CuteNavbar() {
     : '';
 
   const DISCORD_LOGIN_URL = DISCORD_CLIENT_ID && authRedirect
-    ? `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(authRedirect)}&response_type=code&scope=identify%20email%20guilds%20guilds.join`
+    ? `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(authRedirect)}&response_type=code&scope=identify%20guilds`
     : '/';
 
   useEffect(() => {

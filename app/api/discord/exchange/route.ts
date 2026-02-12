@@ -47,7 +47,7 @@ export async function POST(request: Request) {
       grant_type: 'authorization_code',
       code,
       redirect_uri: redirectUri,
-      scope: 'identify email guilds guilds.join',
+      scope: 'identify guilds',
     });
 
     const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
