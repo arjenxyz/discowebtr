@@ -30,7 +30,10 @@ export async function POST(request: Request) {
 
     const clientId = process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID;
     const clientSecret = process.env.DISCORD_CLIENT_SECRET;
-    const redirectUri = process.env.NEXT_PUBLIC_REDIRECT_URI;
+    // Prefer the more explicit env var if present (ensure exact match with Discord app)
+    const redirectUri = process.env.NEXT_PUBLIC_DISCORD_REDIRECT_URI ?? process.env.NEXT_PUBLIC_REDIRECT_URI;
+    // Log redirectUri for debugging (will be recorded by logWebEvent)
+    console.log('Using redirectUri for token exchange:', redirectUri);
     const botToken = process.env.DISCORD_BOT_TOKEN;
 
     if (!code || !clientId || !clientSecret || !redirectUri || !botToken) {

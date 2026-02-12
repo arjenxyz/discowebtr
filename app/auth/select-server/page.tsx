@@ -45,7 +45,7 @@ export default function SelectServerPage() {
   const loginUrl = useMemo(() => {
     const clientId = process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID ?? '';
     const redirectUri =
-      process.env.NEXT_PUBLIC_REDIRECT_URI ?? process.env.NEXT_PUBLIC_DISCORD_REDIRECT_URI ?? '';
+      process.env.NEXT_PUBLIC_DISCORD_REDIRECT_URI ?? process.env.NEXT_PUBLIC_REDIRECT_URI ?? '';
     return `https://discord.com/oauth2/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(
       redirectUri,
     )}&response_type=code&scope=identify%20guilds`;

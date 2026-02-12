@@ -38,7 +38,8 @@ export default function CuteNavbar() {
 
   // --- DISCORD OAUTH LINK ---
   const DISCORD_CLIENT_ID = process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID ?? process.env.DISCORD_CLIENT_ID ?? '';
-  const REDIRECT_RAW = process.env.NEXT_PUBLIC_REDIRECT_URI ?? process.env.NEXT_PUBLIC_DISCORD_REDIRECT_URI ?? '';
+  // Prefer the explicit Discord redirect env var to avoid origin mismatches on Vercel
+  const REDIRECT_RAW = process.env.NEXT_PUBLIC_DISCORD_REDIRECT_URI ?? process.env.NEXT_PUBLIC_REDIRECT_URI ?? '';
 
   // Normalize redirect URI: prefer configured env, otherwise derive from current origin.
   const getAuthRedirect = () => {

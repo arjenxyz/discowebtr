@@ -40,7 +40,7 @@ function DiscordAuthCallbackContent() {
         });
 
         if (!response.ok) {
-          let body: any = null;
+          let body: unknown = null;
           try {
             body = await response.json();
           } catch {
