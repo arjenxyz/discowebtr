@@ -400,6 +400,10 @@ export async function POST(request: Request) {
     // Attempt to assign roles via Discord REST before marking paid.
     try {
       const { data: fullOrder } = await supabase.from('store_orders').select('id,user_id,items,role_id').eq('id', order.id).maybeSingle();
+      if (!fullOrder) {
+        await supabase.from('store_orders').update({ status: 'failed', failure_reason: 'order_missing_details' }).eq('id', order.id);
+        return NextResponse.json({ error: 'order_missing_details' }, { status: 500 });
+      }
       const botToken = process.env.DISCORD_BOT_TOKEN;
       if (!botToken) {
         await supabase.from('store_orders').update({ status: 'failed', failure_reason: 'missing_bot_token' }).eq('id', order.id);
