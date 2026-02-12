@@ -49,11 +49,14 @@ export default function DashboardPage() {
 
   useEffect(() => {
     try {
-      if (typeof window !== 'undefined') setSearchParams(new URLSearchParams(window.location.search));
-      const s = searchParams?.get('section');
-      if (s === 'mail') setActiveSection('mail');
+      if (typeof window !== 'undefined') {
+        const sp = new URLSearchParams(window.location.search);
+        setSearchParams(sp);
+        const s = sp.get('section');
+        if (s === 'mail') setActiveSection('mail');
+      }
     } catch {}
-  }, [searchParams]);
+  }, []);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);

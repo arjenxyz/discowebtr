@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { LuHouse, LuMail, LuShield, LuStore, LuLogOut, LuSettings, LuChevronRight, LuArrowLeft } from 'react-icons/lu';
@@ -116,6 +116,7 @@ export default function DashboardHeader({
   const [currentGif, setCurrentGif] = useState(RANDOM_GIFS[0]);
   const [isLogoHovered, setIsLogoHovered] = useState(false);
   const [fetchedIcons, setFetchedIcons] = useState<Record<string, string | null>>({});
+  const fetchedIconsSeenRef = useRef<Set<string>>(new Set());
   const [switchingServerId, setSwitchingServerId] = useState<string | null>(null);
   const switchTimeoutRef = React.useRef<number | null>(null);
 
@@ -195,7 +196,8 @@ export default function DashboardHeader({
     if (!server?.guilds || server.guilds.length === 0) return;
 
     server.guilds.forEach((g) => {
-      if (g.iconUrl || fetchedIcons[g.id] !== undefined) return; // already have
+      if (g.iconUrl || fetchedIconsSeenRef.current.has(g.id)) return; // already fetched or provided
+      fetchedIconsSeenRef.current.add(g.id);
       void (async () => {
         try {
           const res = await fetch(`/api/discord/guild/${g.id}`);
@@ -210,7 +212,7 @@ export default function DashboardHeader({
         }
       })();
     });
-  }, [server?.guilds, fetchedIcons]);
+  }, [server?.guilds]);
 
   const handleSelectServer = (guild: { id: string; name: string; isSetup: boolean }) => {
     if (!guild.isSetup) {

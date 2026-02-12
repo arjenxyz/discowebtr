@@ -64,6 +64,9 @@ export default function CuteNavbar() {
     ? `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(authRedirect)}&response_type=code&scope=identify%20guilds`
     : '/';
 
+  useEffect(() => {
+    console.debug('CuteNavbar env', { DISCORD_CLIENT_ID, REDIRECT_RAW, authRedirect, DISCORD_LOGIN_URL });
+  }, [DISCORD_CLIENT_ID, REDIRECT_RAW, authRedirect, DISCORD_LOGIN_URL]);
   // Mobil menü scroll kilidi
   useEffect(() => {
     if (mobileOpen) {
@@ -315,6 +318,14 @@ export default function CuteNavbar() {
                 href={DISCORD_LOGIN_URL}
                 onMouseEnter={() => setOpenMenu('login')}
                 onMouseLeave={() => setOpenMenu(null)}
+                onClick={(e) => {
+                  if (!DISCORD_CLIENT_ID || !DISCORD_LOGIN_URL || DISCORD_LOGIN_URL === '/') {
+                    e.preventDefault();
+                    console.warn('DISCORD login blocked: missing env vars', { DISCORD_CLIENT_ID, DISCORD_LOGIN_URL });
+                    alert('Giriş yapılamıyor: Discord istemci kimliği veya redirect URI yapılandırılmamış. Lütfen NEXT_PUBLIC_DISCORD_CLIENT_ID ve NEXT_PUBLIC_REDIRECT_URI değerlerini kontrol edin.');
+                    return;
+                  }
+                }}
                 className={`hidden md:inline-flex items-center justify-center px-5 py-2.5 font-bold text-sm rounded-full transition-all duration-300 ${
                   openMenu === 'login'
                     ? 'bg-[#5865F2] text-white shadow-lg shadow-[#5865F2]/30 scale-105'
@@ -375,7 +386,18 @@ export default function CuteNavbar() {
                      Devam Et
                    </Link>
                  ) : (
-                   <Link href={DISCORD_LOGIN_URL} className="w-full block text-center bg-[#5865F2] text-white font-bold py-4 rounded-2xl">
+                   <Link
+                     href={DISCORD_LOGIN_URL}
+                     onClick={(e) => {
+                       if (!DISCORD_CLIENT_ID || !DISCORD_LOGIN_URL || DISCORD_LOGIN_URL === '/') {
+                         e.preventDefault();
+                         console.warn('DISCORD login blocked (mobile): missing env vars', { DISCORD_CLIENT_ID, DISCORD_LOGIN_URL });
+                         alert('Giriş yapılamıyor: Discord istemci kimliği veya redirect URI yapılandırılmamış. Lütfen NEXT_PUBLIC_DISCORD_CLIENT_ID ve NEXT_PUBLIC_REDIRECT_URI değerlerini kontrol edin.');
+                         return;
+                       }
+                     }}
+                     className="w-full block text-center bg-[#5865F2] text-white font-bold py-4 rounded-2xl"
+                   >
                      Discord ile Bağlan
                    </Link>
                  )}
