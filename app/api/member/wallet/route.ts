@@ -62,14 +62,14 @@ export async function GET() {
   const { data: wallet } = await supabase
     .from('member_wallets')
     .select('balance')
-    .eq('guild_id', server.id)  // Use server.id (UUID) instead of selectedGuildId
+    .eq('guild_id', selectedGuildId)
     .eq('user_id', userId)
     .maybeSingle();
 
   const { data: sentToday } = await supabase
     .from('wallet_ledger')
     .select('amount')
-    .eq('guild_id', server.id)  // Use server.id (UUID) instead of selectedGuildId
+    .eq('guild_id', selectedGuildId)
     .eq('user_id', userId)
     .eq('type', 'transfer_out')
     .gte('created_at', getTodayStartIso());

@@ -10,6 +10,7 @@ export const MAINTENANCE_KEYS = [
   'promotions',
   'discounts',
   'transfers',
+  'bot',
 ] as const;
 
 export type MaintenanceKey = (typeof MAINTENANCE_KEYS)[number];
@@ -53,17 +54,29 @@ const isDeveloper = async (userId: string) => {
   if (!botToken || !roleId || !guildId) {
     return false;
   }
+  // Use AbortController to avoid hanging requests and handle network errors gracefully
+  const controller = new AbortController();
+  const timeout = Number(process.env.DISCORD_API_TIMEOUT_MS ?? 10000);
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-  const response = await fetch(`https://discord.com/api/guilds/${guildId}/members/${userId}`, {
-    headers: { Authorization: `Bot ${botToken}` },
-  });
+  try {
+    const response = await fetch(`https://discord.com/api/guilds/${guildId}/members/${userId}`, {
+      headers: { Authorization: `Bot ${botToken}` },
+      signal: controller.signal,
+    });
 
-  if (!response.ok) {
+    if (!response.ok) {
+      return false;
+    }
+
+    const member = (await response.json()) as { roles?: string[] };
+    return Boolean(member.roles?.includes(roleId));
+  } catch (err) {
+    // Network error, timeout, or fetch aborted — treat as non-developer to avoid crashing
     return false;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const member = (await response.json()) as { roles?: string[] };
-  return Boolean(member.roles?.includes(roleId));
 };
 
 const createDefaultFlags = (): MaintenanceMap =>

@@ -63,9 +63,16 @@ export default function DeveloperUserLookupPage() {
       invite?: string | null;
     }>
   >([]);
+  const [targetOauthGuilds, setTargetOauthGuilds] = useState<
+    Array<{
+      discord_id: string;
+      name: string;
+      icon_url?: string | null;
+      owner?: boolean;
+      permissions?: string;
+    }>
+  >([]);
   const [hasSearched, setHasSearched] = useState(false);
-  const [joinLoadingId, setJoinLoadingId] = useState<string | null>(null);
-  const [joinMessage, setJoinMessage] = useState<string | null>(null);
   const [deniedMessage, setDeniedMessage] = useState<string | null>(null);
 
 
@@ -91,7 +98,7 @@ export default function DeveloperUserLookupPage() {
     const checkAccess = async () => {
       try {
         setAccessLoading(true);
-        const response = await fetch('/api/developer/access', { cache: 'no-store' });
+        const response = await fetch('/api/developer/check-access', { cache: 'no-store', credentials: 'include' });
         if (response.ok) {
           setAccessAllowed(true);
           setAccessError(null);
@@ -145,9 +152,22 @@ export default function DeveloperUserLookupPage() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      localStorage.clear();
+      if (typeof document !== 'undefined') {
+        document.cookie.split(';').forEach((c) => {
+          const name = c.split('=')[0].trim();
+          try {
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=${window.location.hostname}`;
+          } catch (e) {
+            // ignore
+          }
+        });
+      }
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
       window.location.href = '/';
     } catch {
+      localStorage.clear();
       window.location.href = '/';
     }
   };
@@ -157,6 +177,8 @@ export default function DeveloperUserLookupPage() {
     if (!query) {
       setSearchUsers([]);
       setSearchServers([]);
+      setOauthGuilds([]);
+      setTargetOauthGuilds([]);
       setSearchError('Lütfen arama terimi girin.');
       return;
     }
@@ -168,7 +190,12 @@ export default function DeveloperUserLookupPage() {
       setSearchLoading(true);
       setSearchError(null);
       setHasSearched(true);
-      const response = await fetch(`/api/developer/user-lookup?query=${encodeURIComponent(query)}`);
+      // Yeni arama öncesi tüm state'leri sıfırla
+      setSearchUsers([]);
+      setSearchServers([]);
+      setOauthGuilds([]);
+      setTargetOauthGuilds([]);
+      const response = await fetch(`/api/developer/user-lookup?query=${encodeURIComponent(query)}`, { cache: 'no-store', credentials: 'include' });
       if (!response.ok) {
         const data = (await response.json().catch(() => ({}))) as { error?: string };
         if (data.error === 'unauthorized') {
@@ -184,6 +211,8 @@ export default function DeveloperUserLookupPage() {
         }
         setSearchUsers([]);
         setSearchServers([]);
+        setOauthGuilds([]);
+        setTargetOauthGuilds([]);
         return;
       }
       const data = (await response.json()) as {
@@ -197,52 +226,30 @@ export default function DeveloperUserLookupPage() {
           link?: string | null;
           invite?: string | null;
         }>;
+        targetOauthGuilds?: Array<{
+          discord_id: string;
+          name: string;
+          icon_url?: string | null;
+          owner?: boolean;
+          permissions?: string;
+        }>;
       };
       setSearchUsers(data.users ?? []);
       setSearchServers(data.servers ?? []);
       setOauthGuilds(data.oauthGuilds ?? []);
-      setJoinMessage(null);
+      setTargetOauthGuilds(data.targetOauthGuilds ?? []);
     } catch {
       setSearchError('Kullanıcı sorgulanamadı.');
+      setSearchUsers([]);
+      setSearchServers([]);
+      setOauthGuilds([]);
+      setTargetOauthGuilds([]);
     } finally {
       setSearchLoading(false);
     }
   };
 
-  const handleJoin = async (discordId: string) => {
-    try {
-      setJoinLoadingId(discordId);
-      setJoinMessage(null);
-      const response = await fetch('/api/developer/guild-join', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: discordId }),
-      });
-      if (response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { status?: string };
-        if (payload.status === 'already_member') {
-          setJoinMessage('Kullanıcı zaten destek sunucusunda.');
-        } else {
-          setJoinMessage('Kullanıcı destek sunucusuna eklendi.');
-        }
-        return;
-      }
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (data.error === 'missing_oauth_token') {
-        setJoinMessage('Kullanıcının OAuth erişimi bulunamadı.');
-      } else if (data.error === 'token_expired') {
-        setJoinMessage('Kullanıcı token süresi dolmuş. Tekrar giriş yaptırın.');
-      } else if (data.error === 'missing_selected_guild') {
-        setJoinMessage('Sunucu seçimi bulunamadı.');
-      } else {
-        setJoinMessage('Kullanıcı sunucuya eklenemedi.');
-      }
-    } catch {
-      setJoinMessage('Kullanıcı sunucuya eklenemedi.');
-    } finally {
-      setJoinLoadingId(null);
-    }
-  };
+  
 
   return (
     <div className="min-h-screen bg-[#0b0d12] text-white">
@@ -375,24 +382,24 @@ export default function DeveloperUserLookupPage() {
             {(searchUsers.length > 0 || searchServers.length > 0 || oauthGuilds.length > 0) && (
               <div className="mt-6 space-y-4">
                 <div className="grid gap-3 md:grid-cols-2">
-                  {searchUsers.map((item) => (
-                    <div key={item.id} className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-                      <p className="text-sm font-semibold text-white">{item.username}</p>
-                      <p className="text-[11px] text-white/50">{item.discord_id}</p>
-                      {item.email && <p className="text-[11px] text-white/40">{item.email}</p>}
-                      <p className="mt-1 text-[11px] text-white/40">{item.points} puan</p>
-                      <button
-                        type="button"
-                        onClick={() => handleJoin(item.discord_id)}
-                        disabled={joinLoadingId === item.discord_id}
-                        className="mt-3 inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-[11px] text-emerald-100 transition hover:border-emerald-300 disabled:opacity-60"
-                      >
-                        {joinLoadingId === item.discord_id ? 'Ekleniyor...' : 'Sunucuya ekle'}
-                      </button>
-                    </div>
-                  ))}
+                  {searchUsers.length > 0 ? (
+                    (() => {
+                      const item = searchUsers[0];
+                      return (
+                        <div key={item.id} className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                          <p className="text-sm font-semibold text-white">{item.username}</p>
+                          <p className="text-[11px] text-white/50">{item.discord_id}</p>
+                          {item.email && <p className="text-[11px] text-white/40">{item.email}</p>}
+                          <p className="mt-1 text-[11px] text-white/40">{item.points} puan</p>
+                        </div>
+                      );
+                    })()
+                  ) : null}
+                  {searchUsers.length > 1 && (
+                    <p className="text-xs text-white/40">Birden fazla sonuç bulundu. Lütfen aramayı daraltın.</p>
+                  )}
                 </div>
-                {joinMessage && <p className="text-xs text-white/60">{joinMessage}</p>}
+                {/* joinMessage removed — server-adding UI disabled */}
                 <div>
                   <p className="text-xs uppercase tracking-[0.2em] text-white/40">Sunucular</p>
                   <div className="mt-2 grid gap-2 md:grid-cols-2">
@@ -419,12 +426,12 @@ export default function DeveloperUserLookupPage() {
                     )}
                   </div>
                 </div>
-                {oauthGuilds.length > 0 && (
+                {targetOauthGuilds.length > 0 && (
                   <div>
-                    <p className="text-xs uppercase tracking-[0.2em] text-white/40">Discord Sunucuları (OAuth)</p>
+                    <p className="text-xs uppercase tracking-[0.2em] text-white/40">Kullanıcının Discord Sunucuları (OAuth)</p>
                     <div className="mt-2 grid gap-2 md:grid-cols-2">
-                      {oauthGuilds.map((server) => (
-                        <div key={server.discord_id ?? server.slug} className="rounded-xl border border-white/10 bg-indigo-500/10 px-4 py-3">
+                      {targetOauthGuilds.map((server) => (
+                        <div key={server.discord_id} className="rounded-xl border border-white/10 bg-emerald-500/10 px-4 py-3">
                           <div className="flex items-center gap-3">
                             {server.icon_url ? (
                               <Image
@@ -441,30 +448,9 @@ export default function DeveloperUserLookupPage() {
                             )}
                             <div>
                               <p className="text-sm text-white/80">{server.name}</p>
-                              <p className="text-[11px] text-white/40">{server.discord_id ?? server.slug}</p>
+                              <p className="text-[11px] text-white/40">{server.discord_id}</p>
+                              {server.owner && <span className="text-[10px] text-yellow-300">Sahibi</span>}
                             </div>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-3">
-                            {server.link && (
-                              <a
-                                href={server.link}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex text-xs text-indigo-200/80 transition hover:text-indigo-100"
-                              >
-                                Widget bağlantısı
-                              </a>
-                            )}
-                            {server.invite && (
-                              <a
-                                href={server.invite}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex text-xs text-emerald-200/80 transition hover:text-emerald-100"
-                              >
-                                Geçici davet
-                              </a>
-                            )}
                           </div>
                         </div>
                       ))}
@@ -473,7 +459,7 @@ export default function DeveloperUserLookupPage() {
                 )}
               </div>
             )}
-            {hasSearched && searchUsers.length === 0 && searchServers.length === 0 && oauthGuilds.length === 0 && !searchLoading && !searchError && (
+            {hasSearched && searchUsers.length === 0 && searchServers.length === 0 && targetOauthGuilds.length === 0 && !searchLoading && !searchError && (
               <div className="mt-6 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/60">
                 Sonuç bulunamadı.
               </div>

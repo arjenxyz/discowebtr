@@ -12,7 +12,7 @@ type NotificationsDropdownProps = {
   notifications: Notification[];
   onToggle: () => void;
   onOpenNotification: (item: Notification) => void;
-  menuRef: RefObject<HTMLDivElement | null>;
+  menuRef: RefObject<HTMLDivElement>;
   onOpenModal?: () => void;
   renderNotificationBody: (body: string) => React.ReactNode;
 };
@@ -86,7 +86,7 @@ export default function NotificationsDropdown({
                     </div>
                     {!item.is_read && <span className="h-2 w-2 rounded-full bg-indigo-400" />}
                   </div>
-                  <p className="mt-1 text-[11px] text-white/50 line-clamp-2">{renderNotificationBody(item.body)}</p>
+                  <div className="mt-1 text-[11px] text-white/50 line-clamp-2">{renderNotificationBody(item.body)}</div>
                   <span className="mt-2 inline-flex text-[10px] text-white/40">
                     {new Date(item.created_at).toLocaleString('tr-TR')}
                   </span>

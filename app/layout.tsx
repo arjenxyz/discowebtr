@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 // BU SATIR OLMAZSA HER ŞEY BEYAZ GÖRÜNÜR:
 import "./globals.css"; 
+import CartProvider from "../lib/cart";
+import CartDrawer from "../components/CartDrawer";
+import ThemeBootstrap from "./components/ThemeBootstrap";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -17,7 +20,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="tr">
-      <body className={inter.className}>{children}</body>
+      <body className={inter.className}>
+        {/* ThemeBootstrap applies persisted theme on client mount; removed pre-hydration inline script
+          to prevent React hydration mismatches. This may cause a very short FOUC but avoids warnings. */}
+        <ThemeBootstrap />
+        <CartProvider>
+          {children}
+          <CartDrawer />
+        </CartProvider>
+      </body>
     </html>
   );
 }

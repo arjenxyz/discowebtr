@@ -1,16 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import DashboardHeader from './components/DashboardHeader';
+import { useCart } from '../../lib/cart';
 import OverviewSection from './components/OverviewSection';
 import ProfileSection from './components/ProfileSection';
 import StoreSection from './components/StoreSection';
-import StoreTrackingSection from './components/StoreTrackingSection';
-import TransactionsSection from './components/TransactionsSection';
 import SettingsSection from './components/SettingsSection';
+import MailSection from './components/MailSection';
 import NotificationDetailModal from './components/NotificationDetailModal';
 import NotificationsModal from './components/NotificationsModal';
 import TransferModal from './components/TransferModal';
@@ -19,44 +20,47 @@ import DiscountsModal from './components/DiscountsModal';
 import type {
   MemberProfile,
   Notification,
-  Order,
   OverviewStats,
-  PurchaseFeedback,
   StoreItem,
+  MailItem,
+  PurchaseFeedback,
 } from './types';
 
 export default function DashboardPage() {
+  const cart = useCart();
   const router = useRouter();
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading] = useState(true);
   const [profile, setProfile] = useState<MemberProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [unauthorized, setUnauthorized] = useState(false);
-  const [items, setItems] = useState<StoreItem[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [storeLoading, setStoreLoading] = useState(true);
-  const [ordersLoading, setOrdersLoading] = useState(true);
-  const [purchaseLoadingId, setPurchaseLoadingId] = useState<string | null>(null);
-  const [purchaseFeedback, setPurchaseFeedback] = useState<PurchaseFeedback>({});
-  const purchaseFeedbackTimers = useRef<Record<string, ReturnType<typeof setTimeout> | undefined>>({});
+  const unauthorizedRef = useRef(unauthorized);
   const [walletBalance, setWalletBalance] = useState(0);
   const [walletLoading, setWalletLoading] = useState(true);
   const [overviewStats, setOverviewStats] = useState<OverviewStats | null>(null);
+  const [adminOverview, setAdminOverview] = useState<any | null>(null);
+  const [adminOverviewLoading, setAdminOverviewLoading] = useState(false);
   const [overviewLoading, setOverviewLoading] = useState(true);
-  const [activeSection, setActiveSection] = useState<'overview' | 'store' | 'transactions' | 'tracking' | 'notifications' | 'profile' | 'settings' | 'mail'>(
+  const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
+  const [storeItemsLoading, setStoreItemsLoading] = useState(true);
+  const [activeSection, setActiveSection] = useState<'overview' | 'store' | 'notifications' | 'profile' | 'settings' | 'mail'>(
     'overview',
   );
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    try {
+      const s = searchParams.get('section');
+      if (s === 'mail') setActiveSection('mail');
+    } catch {}
+  }, [searchParams]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeNotification, setActiveNotification] = useState<Notification | null>(null);
   const notificationsMenuRef = useRef<HTMLDivElement | null>(null);
   const settingsMenuRef = useRef<HTMLDivElement | null>(null);
-  const [promoCode, setPromoCode] = useState('');
-  const [promoLoading, setPromoLoading] = useState(false);
-  const [promoError, setPromoError] = useState<string | null>(null);
-  const [promoSuccess, setPromoSuccess] = useState<string | null>(null);
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [transferRecipientId, setTransferRecipientId] = useState('');
   const [transferAmount, setTransferAmount] = useState('');
@@ -78,8 +82,19 @@ export default function DashboardPage() {
       window.location.reload();
     },
   });
+  const [purchaseFeedback, setPurchaseFeedback] = useState<PurchaseFeedback>({});
+  const [purchaseLoadingId, setPurchaseLoadingId] = useState<string | null>(null);
+  const [mailItems, setMailItems] = useState<MailItem[]>([]);
+  const [mailLoading, setMailLoading] = useState(true);
+  const [mailError, setMailError] = useState<string | null>(null);
 
   const effectiveSection = unauthorized && activeSection !== 'store' ? 'overview' : activeSection;
+
+  useEffect(() => {
+    // mirror `unauthorized` into a ref so effects can read it without
+    // changing dependency array lengths.
+    unauthorizedRef.current = unauthorized;
+  }, [unauthorized]);
 
   useEffect(() => {
     let isMounted = true;
@@ -120,10 +135,7 @@ export default function DashboardPage() {
   const siteReason = maintenanceFlags?.site?.reason;
   const isStoreMaintenance = Boolean(maintenanceFlags?.store?.is_active);
   const storeReason = maintenanceFlags?.store?.reason;
-  const isTransactionsMaintenance = Boolean(maintenanceFlags?.transactions?.is_active);
-  const transactionsReason = maintenanceFlags?.transactions?.reason;
-  const isTrackingMaintenance = Boolean(maintenanceFlags?.tracking?.is_active);
-  const trackingReason = maintenanceFlags?.tracking?.reason;
+  const storeUpdater = maintenanceFlags?.store?.updated_by ? maintenanceUpdaters[maintenanceFlags.store.updated_by] : null;
   const isPromotionsMaintenance = Boolean(
     maintenanceFlags?.promotions?.is_active || maintenanceFlags?.discounts?.is_active,
   );
@@ -132,13 +144,6 @@ export default function DashboardPage() {
   const isTransfersMaintenance = Boolean(maintenanceFlags?.transfers?.is_active);
   const transfersReason = maintenanceFlags?.transfers?.reason;
   const siteUpdater = maintenanceFlags?.site?.updated_by ? maintenanceUpdaters[maintenanceFlags.site.updated_by] : null;
-  const storeUpdater = maintenanceFlags?.store?.updated_by ? maintenanceUpdaters[maintenanceFlags.store.updated_by] : null;
-  const transactionsUpdater = maintenanceFlags?.transactions?.updated_by
-    ? maintenanceUpdaters[maintenanceFlags.transactions.updated_by]
-    : null;
-  const trackingUpdater = maintenanceFlags?.tracking?.updated_by
-    ? maintenanceUpdaters[maintenanceFlags.tracking.updated_by]
-    : null;
   const promotionsUpdater = maintenanceFlags?.promotions?.updated_by
     ? maintenanceUpdaters[maintenanceFlags.promotions.updated_by]
     : maintenanceFlags?.discounts?.updated_by
@@ -152,16 +157,44 @@ export default function DashboardPage() {
   }, [isSiteMaintenance, maintenanceLoading, router]);
 
   useEffect(() => {
-    const load = async () => {
-      const response = await fetch('/api/notifications');
-      if (response.ok) {
-        const data = (await response.json()) as Notification[];
-        setNotifications(data);
+    const refreshMail = async () => {
+      setMailLoading(true);
+      try {
+        const response = await fetch('/api/mail');
+        if (response.ok) {
+          const data = (await response.json()) as MailItem[];
+          setMailItems(data);
+          setMailError(null);
+        } else {
+          setMailError('Mail bilgileri alınamadı.');
+        }
+      } catch {
+        setMailError('Mail bilgileri alınamadı.');
       }
-      setLoading(false);
+      setMailLoading(false);
     };
 
-    load();
+    // initial load
+    refreshMail();
+
+    const onRefresh = () => {
+      void refreshMail();
+    };
+    window.addEventListener('mail:refresh', onRefresh as EventListener);
+
+    // Poll for new mail so external events (like admin balance additions)
+    // appear without a full page reload. Interval is intentionally short
+    // for near-real-time UX.
+    const mailInterval = setInterval(() => {
+      if (!unauthorizedRef.current) {
+        void refreshMail();
+      }
+    }, 15000); // 15 seconds
+
+    return () => {
+      window.removeEventListener('mail:refresh', onRefresh as EventListener);
+      clearInterval(mailInterval);
+    };
   }, []);
 
   useEffect(() => {
@@ -225,31 +258,40 @@ export default function DashboardPage() {
     loadProfile();
   }, []);
 
-  useEffect(() => {
-    const loadPromotions = async () => {
-      const response = await fetch('/api/member/store');
-      if (response.ok) {
-        const data = (await response.json()) as { items: StoreItem[] };
-        setItems(data.items ?? []);
-      }
-      setStoreLoading(false);
-    };
-
-    loadPromotions();
-  }, []);
-
-  useEffect(() => {
-    const loadWallet = async () => {
+  const refreshWalletBalance = async () => {
+    try {
       const response = await fetch('/api/member/wallet');
       if (response.ok) {
         const data = (await response.json()) as { balance: number };
         setWalletBalance(Number(data.balance ?? 0));
+      } else if (response.status === 401) {
+        // Kullanıcı oturumu sonlanmış, unauthorized yap
+        setUnauthorized(true);
       }
+      // Diğer hatalar için sessizce geç
+    } catch (error) {
+      // Network hatası durumunda sessizce geç (örneğin offline)
+      console.warn('Wallet balance refresh failed:', error);
+    }
+  };
+
+  useEffect(() => {
+    const loadWallet = async () => {
+      await refreshWalletBalance();
       setWalletLoading(false);
     };
 
     loadWallet();
-  }, []);
+
+    // Her 30 saniyede bir bakiye güncellemesi için interval
+    const balanceInterval = setInterval(() => {
+      if (!unauthorized) {
+        refreshWalletBalance();
+      }
+    }, 30000); // 30 saniye
+
+    return () => clearInterval(balanceInterval);
+  }, [unauthorized]);
 
   useEffect(() => {
     const loadOverview = async () => {
@@ -265,41 +307,96 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const loadOrders = async () => {
-      const response = await fetch('/api/member/transactions');
-      if (response.ok) {
-        const data = (await response.json()) as { orders: Order[] };
-        setOrders(data.orders ?? []);
+    // fetch admin overview stats if user has admin guilds
+    const hasAdminGuilds = Array.isArray(headerServer.guilds) && headerServer.guilds.length > 0;
+    if (!hasAdminGuilds) return;
+    let isMounted = true;
+    const loadAdminOverview = async () => {
+      setAdminOverviewLoading(true);
+      try {
+        const res = await fetch('/api/admin/overview-stats?rangeHours=24', { cache: 'no-store' });
+        if (!res.ok) {
+          setAdminOverview(null);
+          setAdminOverviewLoading(false);
+          return;
+        }
+        const data = await res.json();
+        if (isMounted) setAdminOverview(data);
+      } catch (err) {
+        if (isMounted) setAdminOverview(null);
       }
-      setOrdersLoading(false);
+      if (isMounted) setAdminOverviewLoading(false);
+    };
+    void loadAdminOverview();
+    return () => { isMounted = false; };
+  }, [headerServer.guilds]);
+
+  const refreshStoreItems = async () => {
+    const response = await fetch('/api/member/store');
+    if (response.ok) {
+      const data = (await response.json()) as { items: StoreItem[] };
+      setStoreItems(data.items ?? []);
+    }
+  };
+
+  useEffect(() => {
+    const loadStoreItems = async () => {
+      await refreshStoreItems();
+      setStoreItemsLoading(false);
     };
 
-    loadOrders();
-  }, []);
+    loadStoreItems();
+
+    // Her 5 dakikada bir mağaza ürünleri güncellemesi
+    const storeInterval = setInterval(() => {
+      if (!unauthorized) {
+        refreshStoreItems();
+      }
+    }, 300000); // 5 dakika
+
+    return () => clearInterval(storeInterval);
+  }, [unauthorized]);
 
   useEffect(() => {
     const loadServerData = async () => {
       setHeaderServer(prev => ({ ...prev, loading: true }));
       try {
-        const response = await fetch('/api/discord/guilds');
-        if (response.ok) {
-          const data = (await response.json()) as { guilds: Array<{ id: string; name: string; icon: string | null }> };
-          const guilds = data.guilds.map(guild => ({
+        // localStorage'dan admin sunucuları al
+        const adminGuilds = localStorage.getItem('adminGuilds');
+        if (!adminGuilds) {
+          console.log('Dashboard: No adminGuilds found in localStorage');
+          setHeaderServer(prev => ({ ...prev, loading: false }));
+          return;
+        }
+
+        try {
+          const parsedGuilds = JSON.parse(adminGuilds);
+          console.log('Dashboard: Loaded adminGuilds from localStorage:', parsedGuilds);
+          type GuildFromStorage = {
+            id: string;
+            name: string;
+            icon?: string | null;
+            isAdmin?: boolean;
+            isSetup?: boolean;
+          };
+          const guilds = (parsedGuilds as GuildFromStorage[]).map((guild) => ({
             id: guild.id,
             name: guild.name,
             iconUrl: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png` : null,
-            isAdmin: false, // TODO: check admin status
-            isSetup: false, // TODO: check setup status
+            isAdmin: guild.isAdmin || false,
+            isSetup: guild.isSetup || false,
           }));
           setHeaderServer(prev => ({
             ...prev,
             guilds,
             loading: false,
           }));
-        } else {
+        } catch (parseError) {
+          console.error('Dashboard: Failed to parse adminGuilds:', parseError);
           setHeaderServer(prev => ({ ...prev, loading: false }));
         }
-      } catch {
+      } catch (error) {
+        console.error('Dashboard: Failed to load server data:', error);
         setHeaderServer(prev => ({ ...prev, loading: false }));
       }
     };
@@ -335,22 +432,6 @@ export default function DashboardPage() {
     () => new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }),
     [],
   );
-
-  const orderStats = useMemo(() => {
-    const paidTotal = orders
-      .filter((order) => order.status === 'paid')
-      .reduce((sum, order) => sum + order.amount, 0);
-    const pendingCount = orders.filter((order) => order.status === 'pending').length;
-    const refundedCount = orders.filter((order) => order.status === 'refunded').length;
-    const failedCount = orders.filter((order) => order.status === 'failed').length;
-    return {
-      paidTotal,
-      pendingCount,
-      refundedCount,
-      failedCount,
-      totalCount: orders.length,
-    };
-  }, [orders]);
 
   const handleTransfer = async () => {
     if (isSiteMaintenance || isTransfersMaintenance) {
@@ -410,7 +491,14 @@ export default function DashboardPage() {
     setTransferRecipientId('');
     setTransferAmount('');
     setTransferLoading(false);
+    // Bakiye güncellemesi için yeniden yükle
+    await refreshWalletBalance();
   };
+
+  const mailUnreadCount = useMemo(
+    () => mailItems.filter((item) => !item.is_read).length,
+    [mailItems],
+  );
 
   const unreadCount = useMemo(
     () => notifications.filter((item) => !item.is_read).length,
@@ -441,41 +529,74 @@ export default function DashboardPage() {
     </span>
   );
 
-  const setTemporaryPurchaseFeedback = (itemId: string, status: 'success' | 'error', message: string) => {
-    setPurchaseFeedback((prev) => ({ ...prev, [itemId]: { status, message } }));
-    const timers = purchaseFeedbackTimers.current;
-    if (timers[itemId]) {
-      clearTimeout(timers[itemId]);
-    }
-    timers[itemId] = setTimeout(() => {
-      setPurchaseFeedback((prev) => {
-        const next = { ...prev };
-        delete next[itemId];
-        return next;
-      });
-    }, 5000);
-  };
-
   const formatRoleColor = (color: number) =>
     color ? `#${color.toString(16).padStart(6, '0')}` : '#64748b';
 
-  const reloadOrders = async () => {
-    setOrdersLoading(true);
-    const response = await fetch('/api/member/transactions');
-    if (response.ok) {
-      const data = (await response.json()) as { orders: Order[] };
-      setOrders(data.orders ?? []);
+  const renderNotificationBody = useCallback((body: string) => {
+    return <span dangerouslySetInnerHTML={{ __html: body }} />;
+  }, []);
+
+  const handleCloseNotificationModal = useCallback(() => {
+    setActiveNotification(null);
+  }, []);
+
+  // mail detail is now a standalone page (see /dashboard/mail/[id])
+
+  const handleCloseTransferModal = useCallback(() => {
+    setTransferModalOpen(false);
+    setTransferError(null);
+    setTransferSuccess(null);
+  }, []);
+
+  const handleCloseNotificationsModal = useCallback(() => {
+    setNotificationsModalOpen(false);
+    setActiveNotification(null);
+  }, []);
+
+  const handleToggleNotifications = useCallback(() => {
+    setNotificationsOpen((prev) => !prev);
+  }, []);
+
+  const handleOpenNotificationsModal = useCallback(() => {
+    setNotificationsOpen(false);
+    setNotificationsModalOpen(true);
+  }, []);
+
+  const handleNotificationClick = useCallback((item: Notification) => {
+    handleOpenNotification(item);
+    setNotificationsOpen(false);
+  }, []);
+
+  const handleToggleSettings = useCallback(() => {
+    setSettingsOpen((prev) => !prev);
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    setActiveSection('settings');
+    setSettingsOpen(false);
+  }, []);
+
+  const handleOpenTransfer = useCallback(() => {
+    if (isSiteMaintenance || isTransfersMaintenance) {
+      setTransferError(transfersReason ?? 'Papel gönderme bakımdadır.');
+      setTransferSuccess(null);
+      setTransferModalOpen(true);
+      setSettingsOpen(false);
+      return;
     }
-    setOrdersLoading(false);
-  };
+    setTransferModalOpen(true);
+    setSettingsOpen(false);
+    setTransferError(null);
+    setTransferSuccess(null);
+  }, [isSiteMaintenance, isTransfersMaintenance, transfersReason]);
 
   const handleAddToCart = (_item: StoreItem) => {
-    // basic placeholder — log for now
-    console.log('add to cart', _item.id);
-  };
-
-  const renderNotificationBody = (body: string) => {
-    return <span dangerouslySetInnerHTML={{ __html: body }} />;
+    try {
+      cart.addToCart(_item);
+      console.log('add to cart', _item.id);
+    } catch (err) {
+      console.error('failed to add to cart', err);
+    }
   };
 
   const openPromotionsModal = () => {
@@ -491,126 +612,60 @@ export default function DashboardPage() {
   };
 
   const handleApplyPromoCode = async (code: string) => {
-    setPromoCode(code);
-    await handleApplyPromo();
+    console.log('Promo code:', code);
   };
 
   const handlePurchase = async (itemId: string) => {
     if (isSiteMaintenance || isStoreMaintenance) {
-      setTemporaryPurchaseFeedback(itemId, 'error', storeReason ?? 'Mağaza şu anda bakımdadır.');
-      return;
-    }
-
-    if (unauthorized) {
-      setTemporaryPurchaseFeedback(itemId, 'error', 'Giriş yapmalısınız');
+      setPurchaseFeedback(prev => ({ ...prev, [itemId]: { status: 'error', message: 'Mağaza bakımda' } }));
+      setTimeout(() => setPurchaseFeedback(prev => ({ ...prev, [itemId]: undefined })), 3000);
       return;
     }
 
     setPurchaseLoadingId(itemId);
+    setPurchaseFeedback(prev => ({ ...prev, [itemId]: undefined })); // clear previous
 
-    const response = await fetch('/api/member/purchase', {
+    const response = await fetch('/api/member/store', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemId }),
+      body: JSON.stringify({ items: [{ itemId, qty: 1 }] }),
     });
-
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (data.error === 'insufficient_funds') {
-        setTemporaryPurchaseFeedback(itemId, 'error', 'Yetersiz bakiye');
-      } else {
-        setTemporaryPurchaseFeedback(itemId, 'error', 'Satın alma başarısız');
-      }
-      setPurchaseLoadingId(null);
-      return;
-    }
-
-    const data = (await response.json().catch(() => ({}))) as { balance?: number };
-    if (typeof data.balance === 'number') {
-      setWalletBalance(Number(data.balance));
-    }
-    await reloadOrders();
-    setPurchaseLoadingId(null);
-    setTemporaryPurchaseFeedback(itemId, 'success', 'Satın alma başarılı');
-  };
-
-  const handleRefund = async (orderId: string) => {
-    if (isSiteMaintenance || isTransactionsMaintenance) {
-      await reloadOrders();
-      return;
-    }
-
-    const response = await fetch('/api/member/refund', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId }),
-    });
-
-    const data = (await response.json().catch(() => ({}))) as { balance?: number };
-    if (response.ok && typeof data.balance === 'number') {
-      setWalletBalance(Number(data.balance));
-      await reloadOrders();
-      return;
-    }
-
-    await reloadOrders();
-  };
-
-  const handleApplyPromo = async () => {
-    if (isSiteMaintenance || isPromotionsMaintenance) {
-      setPromoError(promotionsReason ?? 'Promosyon/indirim kodları bakımdadır.');
-      return;
-    }
-
-    setPromoError(null);
-    setPromoSuccess(null);
-
-    if (unauthorized) {
-      setPromoError('Promosyon kodu için giriş yapmalısınız.');
-      return;
-    }
-
-    if (!promoCode.trim()) {
-      setPromoError('Lütfen bir promosyon kodu girin.');
-      return;
-    }
-
-    setPromoLoading(true);
-    const response = await fetch('/api/member/promotion', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: promoCode.trim() }),
-    });
-
     const data = (await response.json().catch(() => ({}))) as {
-      amount?: number;
-      balance?: number;
+      success?: boolean;
       error?: string;
+      newBalance?: number;
     };
+
+    setPurchaseLoadingId(null);
+
     if (!response.ok) {
-      if (data.error === 'invalid_code') {
-        setPromoError('Kod bulunamadı veya pasif.');
-      } else if (data.error === 'expired') {
-        setPromoError('Kodun süresi dolmuş.');
-      } else if (data.error === 'limit_reached') {
-        setPromoError('Bu promosyon kodunun limiti doldu.');
-      } else {
-        setPromoError('Kod doğrulanamadı.');
-      }
-      setPromoLoading(false);
+      setPurchaseFeedback(prev => ({ ...prev, [itemId]: { status: 'error', message: data.error || 'Satın alma başarısız' } }));
+      setTimeout(() => setPurchaseFeedback(prev => ({ ...prev, [itemId]: undefined })), 3000);
       return;
     }
 
-    if (typeof data.balance === 'number') {
-      setWalletBalance(Number(data.balance));
+    if (data.success && typeof data.newBalance === 'number') {
+      setWalletBalance(data.newBalance);
+      setPurchaseFeedback(prev => ({ ...prev, [itemId]: { status: 'success', message: 'Satın alındı!' } }));
+      setTimeout(() => setPurchaseFeedback(prev => ({ ...prev, [itemId]: undefined })), 3000);
+    } else {
+      setPurchaseFeedback(prev => ({ ...prev, [itemId]: { status: 'error', message: 'Bilinmeyen hata' } }));
+      setTimeout(() => setPurchaseFeedback(prev => ({ ...prev, [itemId]: undefined })), 3000);
     }
-    setPromoSuccess(`Kod doğrulandı. ${Number(data.amount ?? 0).toFixed(2)} papel hesabınıza eklendi.`);
-    setPromoLoading(false);
+    // Bakiye ve mağaza ürünleri güncellemesi için yeniden yükle
+    await refreshWalletBalance();
+    await refreshStoreItems();
   };
+
+  const mainWrapperClass = effectiveSection === 'mail'
+    ? 'mx-0 w-full max-w-full px-0'
+    : 'mx-auto max-w-6xl px-6';
+  const mainSpacingClass = effectiveSection === 'mail' ? 'py-0 gap-0' : 'pt-24 pb-10 gap-6';
 
   return (
     <div className="min-h-screen bg-[#0b0d12] text-white">
       <div className="min-h-screen">
+        {effectiveSection !== 'mail' && (
         <DashboardHeader
           unauthorized={unauthorized}
           walletLoading={walletLoading}
@@ -637,46 +692,27 @@ export default function DashboardPage() {
             unreadCount,
             loading,
             items: notifications,
-            onToggle: () => setNotificationsOpen((prev) => !prev),
-            onOpenModal: () => {
-              setNotificationsOpen(false);
-              setNotificationsModalOpen(true);
-            },
-            onOpenNotification: (item) => {
-              handleOpenNotification(item);
-              setNotificationsOpen(false);
-            },
+            onToggle: handleToggleNotifications,
+            onOpenModal: handleOpenNotificationsModal,
+            onOpenNotification: handleNotificationClick,
             menuRef: notificationsMenuRef,
           }}
+          mailUnreadCount={mailUnreadCount}
           renderNotificationBody={renderNotificationBody}
           settings={{
             open: settingsOpen,
-            onToggle: () => setSettingsOpen((prev) => !prev),
-            onOpenSettings: () => {
-              setActiveSection('settings');
-              setSettingsOpen(false);
-            },
-            onOpenTransfer: () => {
-              if (isSiteMaintenance || isTransfersMaintenance) {
-                setTransferError(transfersReason ?? 'Papel gönderme bakımdadır.');
-                setTransferSuccess(null);
-                setTransferModalOpen(true);
-                setSettingsOpen(false);
-                return;
-              }
-              setTransferModalOpen(true);
-              setSettingsOpen(false);
-              setTransferError(null);
-              setTransferSuccess(null);
-            },
+            onToggle: handleToggleSettings,
+            onOpenSettings: handleOpenSettings,
+            onOpenTransfer: handleOpenTransfer,
             onOpenPromotions: openPromotionsModal,
             onOpenDiscounts: openDiscountsModal,
             logoutHref: '/api/auth/logout',
             menuRef: settingsMenuRef,
           }}
         />
+        )}
 
-        <main className="mx-auto flex max-w-6xl flex-col gap-6 px-6 pb-10 pt-24">
+        <main className={`${mainWrapperClass} flex flex-col ${mainSpacingClass}`}>
             {!maintenanceLoading && isSiteMaintenance && (
               <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6">
                 <p className="text-sm font-semibold text-amber-200">Site bakımda</p>
@@ -710,17 +746,42 @@ export default function DashboardPage() {
               </section>
             )}
             {!isSiteMaintenance && effectiveSection === 'overview' && (
-              <OverviewSection
-                overviewLoading={overviewLoading}
-                overviewStats={overviewStats}
-                profileLoading={profileLoading}
-                profileError={profileError}
-                unauthorized={unauthorized}
-                profile={profile}
-                orderStats={orderStats}
-                renderPapelAmount={renderPapelAmount}
-                formatRoleColor={formatRoleColor}
-              />
+              <>
+                {Array.isArray(headerServer.guilds) && headerServer.guilds.length > 0 && (
+                  <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-6 overview-fade">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-indigo-300">Sunucu Hızlı İstatistik</p>
+                    <p className="mt-1 text-sm text-white/60">Son 24 saat ve toplam özet.</p>
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="rounded-xl border border-white/10 bg-[#0b0d12]/60 p-4">
+                        <p className="text-xs text-white/50">24s Mesaj</p>
+                        <p className="mt-1 text-lg font-semibold text-white">{adminOverviewLoading ? '...' : (adminOverview?.rangeMessages ?? 0).toLocaleString('tr-TR')}</p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-[#0b0d12]/60 p-4">
+                        <p className="text-xs text-white/50">24s Sesli dakika</p>
+                        <p className="mt-1 text-lg font-semibold text-white">{adminOverviewLoading ? '...' : (adminOverview?.rangeVoiceMinutes ?? 0).toLocaleString('tr-TR')}</p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-[#0b0d12]/60 p-4">
+                        <p className="text-xs text-white/50">Toplam mesaj</p>
+                        <p className="mt-1 text-lg font-semibold text-white">{adminOverviewLoading ? '...' : (adminOverview?.totalMessages ?? 0).toLocaleString('tr-TR')}</p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-[#0b0d12]/60 p-4">
+                        <p className="text-xs text-white/50">Toplam sesli dakika</p>
+                        <p className="mt-1 text-lg font-semibold text-white">{adminOverviewLoading ? '...' : (adminOverview?.totalVoiceMinutes ?? 0).toLocaleString('tr-TR')}</p>
+                      </div>
+                    </div>
+                  </section>
+                )}
+                <OverviewSection
+                  overviewLoading={overviewLoading}
+                  overviewStats={overviewStats}
+                  profileLoading={profileLoading}
+                  profileError={profileError}
+                  unauthorized={unauthorized}
+                  profile={profile}
+                  renderPapelAmount={renderPapelAmount}
+                  formatRoleColor={formatRoleColor}
+                />
+              </>
             )}
 
             {!isSiteMaintenance && effectiveSection === 'profile' && (
@@ -752,8 +813,8 @@ export default function DashboardPage() {
             )}
             {effectiveSection === 'store' && !isSiteMaintenance && !isStoreMaintenance && (
               <StoreSection
-                storeLoading={storeLoading}
-                items={items}
+                storeLoading={storeItemsLoading}
+                items={storeItems}
                 purchaseLoadingId={purchaseLoadingId}
                 purchaseFeedback={purchaseFeedback}
                 onPurchase={handlePurchase}
@@ -761,58 +822,6 @@ export default function DashboardPage() {
                 renderPapelAmount={renderPapelAmount}
               />
             )}
-
-            {effectiveSection === 'transactions' && !isSiteMaintenance && isTransactionsMaintenance && (
-              <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6 text-sm text-amber-100/80">
-                {transactionsReason ?? 'İşlemler şu anda bakımdadır.'}
-                {transactionsUpdater && (
-                  <div className="mt-3 flex items-center gap-2 text-xs text-amber-100/70">
-                    <Image
-                      src={transactionsUpdater.avatarUrl}
-                      alt="avatar"
-                      width={20}
-                      height={20}
-                      className="h-5 w-5 rounded-full border border-amber-200/40"
-                    />
-                    <span>Yetkili: {transactionsUpdater.name}</span>
-                  </div>
-                )}
-              </section>
-            )}
-            {effectiveSection === 'transactions' && !isSiteMaintenance && !isTransactionsMaintenance && (
-              <TransactionsSection
-                ordersLoading={ordersLoading}
-                orders={orders}
-                orderStats={orderStats}
-                onRefund={handleRefund}
-                renderPapelAmount={renderPapelAmount}
-              />
-            )}
-
-            {effectiveSection === 'tracking' && !isSiteMaintenance && isTrackingMaintenance && (
-              <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6 text-sm text-amber-100/80">
-                {trackingReason ?? 'Mağaza takip şu anda bakımdadır.'}
-                {trackingUpdater && (
-                  <div className="mt-3 flex items-center gap-2 text-xs text-amber-100/70">
-                    <Image
-                      src={trackingUpdater.avatarUrl}
-                      alt="avatar"
-                      width={20}
-                      height={20}
-                      className="h-5 w-5 rounded-full border border-amber-200/40"
-                    />
-                    <span>Yetkili: {trackingUpdater.name}</span>
-                  </div>
-                )}
-              </section>
-            )}
-            {effectiveSection === 'tracking' && !isSiteMaintenance && !isTrackingMaintenance && (
-              <StoreTrackingSection
-                ordersLoading={ordersLoading}
-                orders={orders}
-              />
-            )}
-
 
             {effectiveSection === 'settings' && !isSiteMaintenance && isPromotionsMaintenance && (
               <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6 text-sm text-amber-100/80">
@@ -837,6 +846,16 @@ export default function DashboardPage() {
                 onOpenDiscountsModal={openDiscountsModal}
               />
             )}
+
+            {effectiveSection === 'mail' && !isSiteMaintenance && (
+              <MailSection
+                loading={mailLoading}
+                error={mailError}
+                items={mailItems}
+                onOpenMail={(mail) => router.push(`/dashboard/mail/${mail.id}`)}
+                onBack={() => setActiveSection('overview')}
+              />
+            )}
           </main>
         </div>
       <NotificationsModal
@@ -844,18 +863,15 @@ export default function DashboardPage() {
         loading={loading}
         notifications={notifications}
         activeNotification={activeNotification}
-        onClose={() => {
-          setNotificationsModalOpen(false);
-          setActiveNotification(null);
-        }}
+        onClose={handleCloseNotificationsModal}
         onOpenNotification={handleOpenNotification}
         renderNotificationBody={renderNotificationBody}
       />
       <NotificationDetailModal
         notification={activeNotification}
-        onClose={() => setActiveNotification(null)}
-        renderNotificationBody={renderNotificationBody}
+        onClose={handleCloseNotificationModal}
       />
+      {/* Mail detail moved to dedicated page */}
       <TransferModal
         open={transferModalOpen}
         recipientId={transferRecipientId}
@@ -865,20 +881,16 @@ export default function DashboardPage() {
         success={transferSuccess}
         onRecipientChange={setTransferRecipientId}
         onAmountChange={setTransferAmount}
-        onClose={() => {
-          setTransferModalOpen(false);
-          setTransferError(null);
-          setTransferSuccess(null);
-        }}
+        onClose={handleCloseTransferModal}
         onSubmit={handleTransfer}
       />
       <PromotionsModal
         isOpen={promotionsModalOpen}
         onClose={() => setPromotionsModalOpen(false)}
         onApply={handleApplyPromoCode}
-        loading={promoLoading}
-        error={promoError}
-        success={promoSuccess}
+        loading={false}
+        error={null}
+        success={null}
       />
 
       <DiscountsModal

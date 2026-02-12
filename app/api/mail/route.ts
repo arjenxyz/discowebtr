@@ -10,6 +10,7 @@ type Database = {
         Row: {
           id: string;
           guild_id: string;
+          user_id: string | null;
           title: string;
           body: string;
           category: string;
@@ -17,9 +18,12 @@ type Database = {
           created_at: string;
           author_name: string | null;
           author_avatar_url: string | null;
+          image_url: string | null;
+          details_url: string | null;
         };
         Insert: {
           guild_id: string;
+          user_id?: string | null;
           title: string;
           body: string;
           category: string;
@@ -27,9 +31,12 @@ type Database = {
           created_at?: string;
           author_name?: string | null;
           author_avatar_url?: string | null;
+          image_url?: string | null;
+          details_url?: string | null;
         };
         Update: {
           guild_id?: string;
+          user_id?: string | null;
           title?: string;
           body?: string;
           category?: string;
@@ -37,6 +44,8 @@ type Database = {
           created_at?: string;
           author_name?: string | null;
           author_avatar_url?: string | null;
+          image_url?: string | null;
+          details_url?: string | null;
         };
         Relationships: [];
       };
@@ -89,9 +98,10 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from('system_mails')
-    .select('id,title,body,category,status,created_at,author_name,author_avatar_url')
+    .select('id,title,body,category,status,created_at,user_id,author_name,author_avatar_url,image_url,details_url')
     .eq('guild_id', selectedGuildId)
     .eq('status', 'published')
+    .or(`user_id.is.null,user_id.eq.${userId}`)
     .gte('created_at', ninetyDaysAgo.toISOString())
     .order('created_at', { ascending: false });
 
@@ -101,7 +111,17 @@ export async function GET() {
 
   const mails = data ?? [];
   if (!userId || mails.length === 0) {
-    return NextResponse.json(mails.map((item) => ({ ...item, is_read: !userId ? true : false })));
+    const unescapeHtml = (s: string) =>
+      String(s)
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+
+    return NextResponse.json(
+      mails.map((item) => ({ ...item, body: typeof item.body === 'string' ? unescapeHtml(item.body) : item.body, is_read: !userId ? true : false }))
+    );
   }
 
   const ids = mails.map((item) => item.id);
@@ -111,8 +131,28 @@ export async function GET() {
     .eq('user_id', userId)
     .in('mail_id', ids);
 
+  const { data: stars } = await supabase
+    .from('system_mail_stars')
+    .select('mail_id')
+    .eq('user_id', userId)
+    .in('mail_id', ids);
+
   const readSet = new Set((reads ?? []).map((entry) => entry.mail_id));
-  const mapped = mails.map((item) => ({ ...item, is_read: readSet.has(item.id) }));
+  const starSet = new Set((stars ?? []).map((entry) => entry.mail_id));
+  const unescapeHtml = (s: string) =>
+    String(s)
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+
+  const mapped = mails.map((item) => ({
+    ...item,
+    body: typeof item.body === 'string' ? unescapeHtml(item.body) : item.body,
+    is_read: readSet.has(item.id),
+    is_starred: starSet.has(item.id),
+  }));
 
   return NextResponse.json(mapped);
 }
@@ -129,21 +169,50 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  const payload = (await request.json()) as { id?: string };
-  if (!payload.id) {
+  const payload = (await request.json()) as { id?: string; ids?: string[] };
+  const ids = payload.ids ?? (payload.id ? [payload.id] : []);
+  if (!ids || ids.length === 0) {
     return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
   }
 
+  const now = new Date().toISOString();
+  const upserts = ids.map((mid) => ({ mail_id: mid, user_id: userId, read_at: now }));
+
   await (supabase.from('system_mail_reads') as unknown as {
-    upsert: (values: Record<string, unknown>, options?: { onConflict?: string }) => Promise<unknown>;
-  }).upsert(
-    {
-      mail_id: payload.id,
-      user_id: userId,
-      read_at: new Date().toISOString(),
-    },
-    { onConflict: 'mail_id,user_id' },
-  );
+    upsert: (values: Record<string, unknown> | Record<string, unknown>[], options?: { onConflict?: string }) => Promise<unknown>;
+  }).upsert(upserts, { onConflict: 'mail_id,user_id' });
+
+  return NextResponse.json({ status: 'ok' });
+}
+
+export async function DELETE(request: Request) {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return NextResponse.json({ error: 'missing_service_role' }, { status: 500 });
+  }
+
+  const cookieStore = await cookies();
+  const selectedGuildId = await getSelectedGuildId();
+  if (!selectedGuildId) {
+    return NextResponse.json({ error: 'server_not_found' }, { status: 404 });
+  }
+
+  const payload = (await request.json()) as { ids?: string[] };
+  const ids = payload.ids ?? [];
+  if (!ids || ids.length === 0) {
+    return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
+  }
+
+  // Soft-delete mails by setting status to 'deleted' so they no longer appear
+  const { error } = await supabase
+    .from('system_mails')
+    .update({ status: 'deleted' })
+    .in('id', ids)
+    .eq('guild_id', selectedGuildId);
+
+  if (error) {
+    return NextResponse.json({ error: 'delete_failed' }, { status: 500 });
+  }
 
   return NextResponse.json({ status: 'ok' });
 }

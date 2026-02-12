@@ -53,8 +53,15 @@ export async function GET() {
       }),
     ]);
 
-    if (!memberResponse.ok || !rolesResponse.ok) {
-      return NextResponse.json({ error: 'fetch_failed' }, { status: 500 });
+    if (!memberResponse.ok) {
+      if (memberResponse.status === 404) {
+        return NextResponse.json({ error: 'user_not_member' }, { status: 403 });
+      }
+      return NextResponse.json({ error: 'fetch_member_failed' }, { status: 500 });
+    }
+
+    if (!rolesResponse.ok) {
+      return NextResponse.json({ error: 'fetch_roles_failed' }, { status: 500 });
     }
 
     const member = (await memberResponse.json()) as {

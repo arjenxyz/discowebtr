@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { code, itemId } = await request.json();
+    const { code, itemId, cartTotal } = await request.json();
     if (!code || typeof code !== 'string' || !itemId) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
     }
@@ -81,33 +81,49 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'İndirim kodu kullanım limiti dolmuş' }, { status: 400 });
     }
 
-    // Check if user already used this code
-    const { data: existingUsage } = await supabase
+    // check per-user usage limit
+    const { data: usageRows } = await supabase
       .from('discount_usages')
       .select('id')
       .eq('discount_id', discount.id)
-      .eq('user_id', userId)
-      .single();
+      .eq('user_id', userId);
 
-    if (existingUsage) {
-      return NextResponse.json({ error: 'Bu indirim kodunu zaten kullandınız' }, { status: 400 });
+    const userUsageCount = usageRows ? usageRows.length : 0;
+    const perUserLimit = discount.per_user_limit ?? 1;
+
+    if (userUsageCount >= perUserLimit) {
+      return NextResponse.json({ ok: false, error: 'ALREADY_USED' }, { status: 400 });
     }
 
-    // Get item details
-    const { data: item } = await supabase
-      .from('store_items')
-      .select('*')
-      .eq('id', itemId)
-      .eq('server_id', server.id)
-      .single();
+    // Determine cart total: prefer explicit cartTotal from client, fallback to single item price
+    let totalAmount = 0;
+    if (typeof cartTotal === 'number' && !isNaN(cartTotal)) {
+      totalAmount = Number(cartTotal);
+    } else {
+      // Get item details
+      const { data: item } = await supabase
+        .from('store_items')
+        .select('*')
+        .eq('id', itemId)
+        .eq('server_id', server.id)
+        .single();
 
-    if (!item) {
-      return NextResponse.json({ error: 'Ürün bulunamadı' }, { status: 404 });
+      if (!item) {
+        return NextResponse.json({ error: 'Ürün bulunamadı' }, { status: 404 });
+      }
+
+      totalAmount = Number(item.price || 0);
     }
 
-    // Calculate discounted price
-    const discountAmount = (item.price * discount.percent) / 100;
-    const finalPrice = item.price - discountAmount;
+    const minSpend = Number(discount.min_spend || 0);
+    if (minSpend > 0 && totalAmount < minSpend) {
+      const remaining = Number((minSpend - totalAmount).toFixed(2));
+      return NextResponse.json({ error: 'MIN_SPEND_NOT_MET', remaining, minSpend }, { status: 400 });
+    }
+
+    // Calculate discounted price for totalAmount
+    const discountAmount = (totalAmount * (Number(discount.percent) || 0)) / 100;
+    const finalPrice = totalAmount - discountAmount;
 
     return NextResponse.json({
       success: true,
@@ -115,9 +131,11 @@ export async function POST(request: Request) {
         id: discount.id,
         code: discount.code,
         percent: discount.percent,
-        originalPrice: item.price,
+        originalPrice: totalAmount,
         discountAmount,
         finalPrice,
+        userUsageCount,
+        perUserLimit,
       },
     });
 

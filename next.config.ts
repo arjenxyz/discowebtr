@@ -11,10 +11,7 @@ const nextConfig: NextConfig = {
     '@discordjs/ws',
     'zlib-sync',
   ],
-  // Configure Turbopack root to this package to avoid workspace-root detection warnings
-  turbopack: {
-    root: path.resolve(__dirname),
-  },
+  turbopack: {},
   images: {
     remotePatterns: [
       {

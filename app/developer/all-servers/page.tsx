@@ -65,7 +65,7 @@ export default function DeveloperAllServersPage() {
     const checkAccess = async () => {
       try {
         setAccessLoading(true);
-        const response = await fetch('/api/developer/access', { cache: 'no-store' });
+        const response = await fetch('/api/developer/check-access', { credentials: 'include', cache: 'no-store' });
         if (response.ok) {
           setAccessAllowed(true);
           setAccessError(null);
@@ -101,7 +101,7 @@ export default function DeveloperAllServersPage() {
       try {
         setDataLoading(true);
         setDataError(null);
-        const response = await fetch('/api/developer/servers-members', { cache: 'no-store' });
+        const response = await fetch('/api/developer/servers-members', { credentials: 'include', cache: 'no-store' });
         if (!response.ok) {
           setDataError('Veriler yüklenemedi.');
           setDataLoading(false);
@@ -139,7 +139,19 @@ export default function DeveloperAllServersPage() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      localStorage.clear();
+      if (typeof document !== 'undefined') {
+        document.cookie.split(';').forEach((c) => {
+          const name = c.split('=')[0].trim();
+          try {
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=${window.location.hostname}`;
+          } catch (e) {
+            // ignore
+          }
+        });
+      }
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
       window.location.href = '/';
     } catch {
       window.location.href = '/';

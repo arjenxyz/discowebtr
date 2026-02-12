@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 type PromotionsModalProps = {
   isOpen: boolean;
@@ -9,9 +10,10 @@ type PromotionsModalProps = {
   loading?: boolean;
   error?: string | null;
   success?: string | null;
+  maintenance?: { is_active: boolean; reason: string | null } | null;
 };
 
-export default function PromotionsModal({ isOpen, onClose, onApply, loading, error, success }: PromotionsModalProps) {
+export default function PromotionsModal({ isOpen, onClose, onApply, loading, error, success, maintenance }: PromotionsModalProps) {
   const [code, setCode] = useState('');
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -34,6 +36,40 @@ export default function PromotionsModal({ isOpen, onClose, onApply, loading, err
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  if (maintenance?.is_active) {
+    return createPortal(
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/80 backdrop-blur-md px-6 pointer-events-auto" aria-hidden={!isOpen}>
+        <div
+          className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0d12] p-6 shadow-2xl"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-lg font-semibold text-white">Bakım Modu</p>
+              <p className="text-xs text-white/50">Bu özellik şu anda bakımda.</p>
+            </div>
+          </div>
+          <div className="mt-5">
+            <p className="text-sm text-white/60">{maintenance.reason || 'Lütfen daha sonra tekrar deneyin.'}</p>
+          </div>
+          <div className="mt-6 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-white/10 px-4 py-2 text-xs text-white transition hover:border-white/30"
+            >
+              Kapat
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  }
 
   const validate = (value: string) => {
     const trimmed = value.trim();
@@ -64,8 +100,8 @@ export default function PromotionsModal({ isOpen, onClose, onApply, loading, err
 
   const isSubmitDisabled = isLoading || Boolean(validate(code));
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md px-6 pointer-events-auto" aria-hidden={!isOpen}>
+  return createPortal(
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/80 backdrop-blur-md px-6 pointer-events-auto" aria-hidden={!isOpen}>
       <div
         className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0d12] p-6 shadow-2xl"
         role="dialog"
@@ -111,6 +147,7 @@ export default function PromotionsModal({ isOpen, onClose, onApply, loading, err
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 } 

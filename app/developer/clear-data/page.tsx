@@ -25,7 +25,7 @@ export default function ClearDataPage() {
   useEffect(() => {
     const checkAccess = async () => {
       try {
-        const response = await fetch('/api/developer/access');
+        const response = await fetch('/api/developer/check-access', { credentials: 'include', cache: 'no-store' });
         if (response.ok) {
           setAccessAllowed(true);
         } else {
@@ -57,6 +57,7 @@ export default function ClearDataPage() {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
       });
 
       const data = await response.json();

@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import type { MemberProfile, OverviewStats, OrderStats } from '../types';
+import type { MemberProfile, OverviewStats } from '../types';
 
 type OverviewSectionProps = {
   overviewLoading: boolean;
@@ -10,7 +10,6 @@ type OverviewSectionProps = {
   profileError: string | null;
   unauthorized: boolean;
   profile: MemberProfile | null;
-  orderStats: OrderStats;
   renderPapelAmount: (value: number) => React.ReactNode;
   formatRoleColor: (color: number) => string;
 };
@@ -22,7 +21,6 @@ export default function OverviewSection({
   profileError,
   unauthorized,
   profile,
-  orderStats,
   renderPapelAmount,
   formatRoleColor,
 }: OverviewSectionProps) {
@@ -125,14 +123,6 @@ export default function OverviewSection({
                 <div className="rounded-xl border border-white/10 bg-white/5 p-4">
                   <p className="text-xs text-white/50">Toplam rol</p>
                   <p className="mt-1 text-lg font-semibold text-white">{profile?.roles?.length ?? 0}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs text-white/50">Bekleyen işlemler</p>
-                  <p className="mt-1 text-lg font-semibold text-white">{orderStats.pendingCount}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4 sm:col-span-2">
-                  <p className="text-xs text-white/50">Toplam harcama</p>
-                  <p className="mt-1 text-lg font-semibold text-white">{renderPapelAmount(orderStats.paidTotal)}</p>
                 </div>
               </div>
             </div>

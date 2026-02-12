@@ -62,7 +62,10 @@ export async function GET() {
     return NextResponse.json({ error: 'server_not_found' }, { status: 404 });
   }
 
-  if (!(await isVerifiedUser(supabase, userId ?? null))) {
+  // Allow logged-in users to fetch their personal notifications even if not verified.
+  // Require verification only for anonymous or server-wide access.
+  const isVerified = await isVerifiedUser(supabase, userId ?? null);
+  if (!userId && !isVerified) {
     return NextResponse.json({ error: 'verify_required' }, { status: 403 });
   }
 
@@ -113,10 +116,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  if (!(await isVerifiedUser(supabase, userId))) {
-    return NextResponse.json({ error: 'verify_required' }, { status: 403 });
-  }
-
+  // Allow marking as read for the user even if not verified
+  // (only allow marking notifications that belong to the current user)
   const payload = (await request.json()) as { id?: string };
   if (!payload.id) {
     return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });

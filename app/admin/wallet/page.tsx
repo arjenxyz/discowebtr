@@ -27,6 +27,87 @@ export default function AdminWalletPage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [selectedMember, setSelectedMember] = useState<MemberResult | null>(null);
 
+  const sendWalletChangeMail = async (userId: string | null, mode: 'add' | 'remove', amount: number, message: string, scope: 'user' | 'all') => {
+    try {
+      const mailTitle = scope === 'all' 
+        ? `Toplu ${mode === 'add' ? 'Bakiye Eklendi' : 'Bakiye Çıkarıldı'}`
+        : (mode === 'add' ? 'Bakiye Eklendi' : 'Bakiye Çıkarıldı');
+      // replace {amount} placeholders in the message with the actual amount
+      const filledMessage = (message || '').replace(/\{amount\}/g, String(amount));
+
+      const mailBody = scope === 'all'
+        ? `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+          <h2 style="color: ${mode === 'add' ? '#10b981' : '#ef4444'}; margin-bottom: 20px;">
+            ${mode === 'add' ? '✅ Toplu Bakiye Eklendi' : '❌ Toplu Bakiye Çıkarıldı'}
+          </h2>
+
+          <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 0; font-size: 16px; font-weight: bold;">
+              İşlem Tutarı: <span style="color: ${mode === 'add' ? '#10b981' : '#ef4444'};">${mode === 'add' ? '+' : '-'}${amount} Papel</span>
+            </p>
+          </div>
+
+            <div style="margin: 20px 0;">
+            <h3 style="color: #374151; margin-bottom: 10px;">İşlem Açıklaması:</h3>
+            <p style="color: #6b7280; margin: 0; padding: 15px; background: #f9fafb; border-left: 4px solid #3b82f6; border-radius: 4px;">
+              ${filledMessage}
+            </p>
+          </div>
+
+          <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+            <p style="color: #6b7280; font-size: 14px; margin: 0;">
+              Bu toplu işlem sistem tarafından gerçekleştirilmiştir.
+            </p>
+          </div>
+        </div>
+      `
+        : `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+          <h2 style="color: ${mode === 'add' ? '#10b981' : '#ef4444'}; margin-bottom: 20px;">
+            ${mode === 'add' ? '✅ Bakiye Eklendi' : '❌ Bakiye Çıkarıldı'}
+          </h2>
+
+          <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 0; font-size: 16px; font-weight: bold;">
+              İşlem Tutarı: <span style="color: ${mode === 'add' ? '#10b981' : '#ef4444'};">${mode === 'add' ? '+' : '-'}${amount} Papel</span>
+            </p>
+          </div>
+
+            <div style="margin: 20px 0;">
+            <h3 style="color: #374151; margin-bottom: 10px;">İşlem Açıklaması:</h3>
+            <p style="color: #6b7280; margin: 0; padding: 15px; background: #f9fafb; border-left: 4px solid #3b82f6; border-radius: 4px;">
+              ${filledMessage}
+            </p>
+          </div>
+
+          <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+            <p style="color: #6b7280; font-size: 14px; margin: 0;">
+              Bu işlem sistem tarafından gerçekleştirilmiştir.
+            </p>
+          </div>
+        </div>
+      `;
+
+      const response = await fetch('/api/admin/mail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          title: mailTitle,
+          body: mailBody,
+          category: 'system',
+        }),
+      });
+
+      if (!response.ok) {
+        console.error('Mail gönderme başarısız:', response.status);
+      }
+    } catch (error) {
+      console.error('Mail gönderme hatası:', error);
+    }
+  };
+
   const userPresets = [
     {
       value: 'maintenance',
@@ -193,6 +274,13 @@ export default function AdminWalletPage() {
       setSuccess(`Tüm kullanıcılara işlem uygulandı. Toplam: ${data.updated ?? 0}`);
     } else {
       setSuccess('İşlem başarılı.');
+    }
+
+    // Mail gönderme işlemi
+    if (scope === 'user') {
+      await sendWalletChangeMail(userId.trim(), mode, value, message.trim(), 'user');
+    } else if (scope === 'all') {
+      await sendWalletChangeMail(null, mode, value, message.trim(), 'all');
     }
 
     setAmount('');

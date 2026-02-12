@@ -97,6 +97,7 @@ const MENU_GROUPS = [
     title: 'Yönetim',
     items: [
       { href: '/admin/wallet', label: 'Bakiye Yönetimi', icon: <LuWallet className="h-5 w-5" /> },
+      { href: '/admin/earn-settings', label: 'Kazanç Ayarları', icon: <LuWallet className="h-5 w-5" /> },
       { href: '/admin/log-channels', label: 'Log Kanalları', icon: <LuClipboardList className="h-5 w-5" /> },
     ],
   },
@@ -146,7 +147,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     const loadProfile = async () => {
-      const response = await fetch('/api/admin/profile');
+      const response = await fetch('/api/admin/profile', { credentials: 'include', cache: 'no-store' });
       if (response.ok) {
         const data = (await response.json()) as {
           username: string;
@@ -160,6 +161,63 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     };
 
     loadProfile();
+  }, []);
+
+  useEffect(() => {
+    const checkAccess = async () => {
+      const safeJson = async (res: Response) => {
+        try {
+          const ct = res.headers.get('content-type') || '';
+          if (ct.includes('application/json')) return await res.json();
+        } catch (e) {
+          // ignore
+        }
+        return { status: res.status, statusText: res.statusText };
+      };
+
+      try {
+        // Admin erişimi kontrolü — cookie/token gönderimi için credentials: 'include'
+        const maxAttempts = 2;
+        let adminOk = false;
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          const adminResponse = await fetch('/api/admin/profile', { credentials: 'include', cache: 'no-store' });
+          if (adminResponse.ok) {
+            console.log('Admin erişimi onaylandı.');
+            adminOk = true;
+            break;
+          }
+          const info = await safeJson(adminResponse);
+          console.warn(`Admin erişimi reddedildi (attempt ${attempt}):`, info);
+          if (adminResponse.status === 403 && attempt < maxAttempts) {
+            // kısa bir bekleme, olası oturum/cookie propagation sorunları için retry
+            // eslint-disable-next-line no-await-in-loop
+            await new Promise((r) => setTimeout(r, 300));
+            continue;
+          }
+          break;
+        }
+
+        if (adminOk) return;
+
+        // Developer erişimi kontrolü
+        const devResponse = await fetch('/api/developer/check-access', { credentials: 'include', cache: 'no-store' });
+        if (devResponse.ok) {
+          console.log('Developer erişimi onaylandı.');
+          return;
+        }
+        const devInfo = await safeJson(devResponse);
+        console.warn('Developer erişimi reddedildi veya bulunamadı:', devInfo);
+
+        // Ne admin ne developer, yönlendirme yap
+        console.log('Erişim reddedildi, dashboarda yönlendiriliyor.');
+        window.location.href = '/dashboard';
+      } catch (error) {
+        console.error('Erişim kontrolü sırasında hata oluştu:', error);
+        window.location.href = '/dashboard';
+      }
+    };
+
+    checkAccess();
   }, []);
 
   useEffect(() => {
@@ -199,8 +257,25 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   }, [accountMenuOpen]);
 
   const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    window.location.href = '/';
+    try {
+      localStorage.clear();
+      if (typeof document !== 'undefined') {
+        document.cookie.split(';').forEach((c) => {
+          const name = c.split('=')[0].trim();
+          try {
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=${window.location.hostname}`;
+          } catch (e) {
+            // ignore
+          }
+        });
+      }
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      window.location.href = '/';
+    } catch {
+      localStorage.clear();
+      window.location.href = '/';
+    }
   };
 
   return (

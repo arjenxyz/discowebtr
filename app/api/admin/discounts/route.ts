@@ -128,7 +128,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from('store_discounts')
-    .select('id,code,percent,max_uses,used_count,status,expires_at,created_at')
+    .select('id,code,percent,max_uses,used_count,per_user_limit,min_spend,status,expires_at,is_welcome,is_special,created_at')
     .eq('server_id', serverId)
     .order('created_at', { ascending: false });
 
@@ -160,8 +160,12 @@ export async function POST(request: Request) {
     code?: string;
     percent?: number;
     maxUses?: number | null;
+    perUserLimit?: number | null;
+    minSpend?: number | null;
     status?: 'active' | 'disabled' | 'expired';
     expiresAt?: string | null;
+    is_welcome?: boolean;
+    is_special?: boolean;
   };
 
   if (!payload.code || typeof payload.percent !== 'number') {
@@ -177,17 +181,65 @@ export async function POST(request: Request) {
       ? Math.floor(payload.maxUses)
       : null;
 
+  const perUserLimit =
+    typeof payload.perUserLimit === 'number' && payload.perUserLimit > 0
+      ? Math.floor(payload.perUserLimit)
+      : 1;
+
+  const minSpendValue = typeof payload.minSpend === 'number' && payload.minSpend > 0 ? Number(payload.minSpend) : 0;
+
+  const codeNormalized = payload.code.trim().toUpperCase();
+
+  // check for existing code in the same server (case-insensitive)
+  const { data: existingRows, error: existingError } = await supabase
+    .from('store_discounts')
+    .select('id')
+    .eq('server_id', serverId)
+    .eq('code', codeNormalized)
+    .limit(1);
+
+  if (existingError) {
+    return NextResponse.json({ error: 'check_existing_failed' }, { status: 500 });
+  }
+
+  if (existingRows && existingRows.length > 0) {
+    return NextResponse.json({ error: 'code_exists' }, { status: 400 });
+  }
+
   const { error } = await supabase.from('store_discounts').insert({
     server_id: serverId,
-    code: payload.code,
+    code: codeNormalized,
     percent: payload.percent,
     max_uses: maxUses,
+    per_user_limit: perUserLimit,
+    min_spend: minSpendValue,
     status: payload.status ?? 'active',
     expires_at: payload.expiresAt ?? null,
+    is_welcome: payload.is_welcome ?? false,
+    is_special: payload.is_special ?? false,
   });
 
   if (error) {
     return NextResponse.json({ error: 'save_failed', details: error.message }, { status: 500 });
+  }
+
+  // If this is a special (public) discount, create a system mail to inform members
+  try {
+    if (payload.is_special) {
+      const mailTitle = `Yeni Özel Promosyon Kodu: ${codeNormalized}`;
+      const mailBody = `Sunucunuz için yeni özel indirim kodu oluşturuldu: ${codeNormalized}.\n\nSepette görünmesi birkaç saniye alabilir; hesabınızda görünmüyorsa sayfayı yenileyin.`;
+      await supabase.from('system_mails').insert({
+        guild_id: selectedGuildId,
+        user_id: null,
+        title: mailTitle,
+        body: mailBody,
+        category: 'lottery',
+        status: 'published',
+        created_at: new Date().toISOString(),
+      });
+    }
+  } catch (mailErr) {
+    console.warn('admin/discounts: failed to insert system mail', mailErr);
   }
 
   await logWebEvent(request, {
@@ -199,8 +251,11 @@ export async function POST(request: Request) {
       code: payload.code,
       percent: payload.percent,
       maxUses,
+        perUserLimit,
+        minSpend: minSpendValue,
       status: payload.status ?? 'active',
       expiresAt: payload.expiresAt ?? null,
+      is_welcome: payload.is_welcome ?? false,
     },
   });
 

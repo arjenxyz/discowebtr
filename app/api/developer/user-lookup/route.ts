@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { serverCache } from '@/lib/serverCache';
+import { logWebEvent } from '@/lib/serverLogger';
 
 const getSupabase = () => {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -87,6 +89,37 @@ export async function GET(request: NextRequest) {
     }
 
     if (!users || users.length === 0) {
+      // Fallback: if query looks like a Discord ID, try to fetch basic user info
+      if (/^\d{10,}$/.test(query)) {
+        try {
+          const discordUserResp = await fetch(`https://discord.com/api/users/${query}`, {
+            headers: { Authorization: `Bot ${botToken}` },
+          });
+
+          if (discordUserResp.ok) {
+            const du = await discordUserResp.json();
+            const fallbackUser = {
+              id: null,
+              discord_id: du.id,
+              username: du.username + (du.discriminator ? `#${du.discriminator}` : ''),
+              email: null,
+              points: 0,
+              role_level: 0,
+              created_at: null,
+              fetched_from_discord: true,
+            };
+
+            return NextResponse.json({
+              users: [fallbackUser],
+              servers: [],
+              oauthGuilds: [],
+            });
+          }
+        } catch (err) {
+          console.error('Discord fallback user fetch failed:', err);
+        }
+      }
+
       return NextResponse.json({
         users: [],
         servers: [],
@@ -117,26 +150,37 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch member servers' }, { status: 500 });
     }
 
-    // Benzersiz sunucuları topla
-    const uniqueServers = new Map<string, { id: string; discord_id: string | null; name: string; slug: string }>();
+    // Kullanıcı başına benzersiz sunucuları topla (her kullanıcının sadece kendi sunucuları)
+    const userServersMap = new Map<string, Map<string, { id: string; discord_id: string | null; name: string; slug: string }>>();
     if (members) {
       members.forEach(member => {
         if (member.servers) {
           const server = Array.isArray(member.servers) ? member.servers[0] : member.servers;
-          if (server && server.discord_id && !uniqueServers.has(server.id)) {
-            uniqueServers.set(server.id, {
-              id: server.id,
-              discord_id: server.discord_id,
-              name: server.name,
-              slug: server.slug
-            });
+          if (server && server.discord_id) {
+            let mapForUser = userServersMap.get(member.discord_id);
+            if (!mapForUser) {
+              mapForUser = new Map();
+              userServersMap.set(member.discord_id, mapForUser);
+            }
+            if (!mapForUser.has(server.id)) {
+              mapForUser.set(server.id, {
+                id: server.id,
+                discord_id: server.discord_id,
+                name: server.name,
+                slug: server.slug,
+              });
+            }
           }
         }
       });
     }
 
     // Her sunucu için widget kontrolü yap
-    const serversPromises = Array.from(uniqueServers.values()).map(async (server) => {
+    // Seçili (ilk) kullanıcıyı hedefle ve sadece onun sunucularını işle
+    const selectedDiscordId = users && users.length > 0 ? users[0].discord_id : null;
+    const selectedUserServers = selectedDiscordId ? Array.from(userServersMap.get(selectedDiscordId || '')?.values() || []) : [];
+
+    const serversPromises = selectedUserServers.map(async (server) => {
       let inviteLink = null;
 
       try {
@@ -168,7 +212,7 @@ export async function GET(request: NextRequest) {
 
     const servers = await Promise.all(serversPromises);
 
-    // OAuth guilds için Discord API çağrısı
+    // OAuth guilds için Discord API çağrısı (öncelik: oturumdaki token, değilse hedef kullanıcının saklı tokenı)
     const oauthGuilds: Array<{
       discord_id: string | null;
       name: string;
@@ -178,166 +222,127 @@ export async function GET(request: NextRequest) {
       invite?: string | null;
     }> = [];
 
+    // Target user's OAuth guilds (if we have their stored token)
+    const targetOauthGuilds: Array<{
+      discord_id: string;
+      name: string;
+      icon_url?: string | null;
+      owner?: boolean;
+      permissions?: string;
+    }> = [];
+
     try {
-      // Mevcut kullanıcının OAuth token'ını cookie'den al
+      // Mevcut geliştirici oturumunun tokenı (cookie)
       const accessToken = cookieStore.get('discord_access_token')?.value;
 
+      // Eğer oturum tokenı varsa, developer'ın görebileceği oauthGuilds'i al
       if (accessToken) {
-        const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-
-        if (guildsResponse.ok) {
-          const guilds = await guildsResponse.json();
-
-          // Her sunucu için invite linki almayı dene
-          for (const guild of guilds) {
-            let inviteLink = null;
-            let inviteCode = null;
-
-            try {
-              // Önce Discord Widget API'sini kontrol et (izin gerektirmez)
-              const widgetResponse = await fetch(
-                `https://discord.com/api/guilds/${guild.id}/widget`,
-                {
-                  headers: { Authorization: `Bot ${botToken}` },
-                }
-              );
-
-              if (widgetResponse.ok) {
-                const widgetData = await widgetResponse.json();
-                if (widgetData.instant_invite) {
-                  inviteCode = widgetData.instant_invite.split('/').pop(); // URL'den code çıkar
-                  inviteLink = widgetData.instant_invite;
-                }
-              }
-
-              // Widget invite yoksa, mevcut invite'ları kontrol et
-              if (!inviteLink) {
-                const invitesResponse = await fetch(
-                  `https://discord.com/api/guilds/${guild.id}/invites`,
-                  {
-                    headers: { Authorization: `Bot ${botToken}` },
-                  }
-                );
-
-                if (invitesResponse.ok) {
-                  const invites = await invitesResponse.json();
-                  if (invites.length > 0) {
-                    // İlk invite'ı kullan
-                    inviteCode = invites[0].code;
-                    inviteLink = `https://discord.gg/${inviteCode}`;
-                  }
-                }
-              }
-
-              // Hala invite yoksa, kullanıcının token'ı ile invite oluşturmayı dene
-              if (!inviteLink && accessToken) {
-                // Sistem kanalını veya kurallar kanalını bul
-                const channelsResponse = await fetch(
-                  `https://discord.com/api/guilds/${guild.id}/channels`,
-                  {
-                    headers: { Authorization: `Bearer ${accessToken}` },
-                  }
-                );
-
-                if (channelsResponse.ok) {
-                  const channels = await channelsResponse.json();
-                  // Text kanallarından ilkini seç
-                  const textChannel = channels.find((ch: DiscordChannel) => ch.type === 0); // 0 = text channel
-
-                  if (textChannel) {
-                    const createInviteResponse = await fetch(
-                      `https://discord.com/api/channels/${textChannel.id}/invites`,
-                      {
-                        method: 'POST',
-                        headers: {
-                          Authorization: `Bearer ${accessToken}`,
-                          'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                          max_age: 604800, // 7 gün
-                          max_uses: 0, // sınırsız
-                          temporary: false,
-                          unique: true,
-                        }),
-                      }
-                    );
-
-                    if (createInviteResponse.ok) {
-                      const invite = await createInviteResponse.json();
-                      inviteCode = invite.code;
-                      inviteLink = `https://discord.gg/${inviteCode}`;
-                    }
-                  }
-                }
-              }
-
-              // Hala invite yoksa, bot ile invite oluşturmayı dene
-              if (!inviteLink) {
-                // Sistem kanalını veya kurallar kanalını bul
-                const channelsResponse = await fetch(
-                  `https://discord.com/api/guilds/${guild.id}/channels`,
-                  {
-                    headers: { Authorization: `Bot ${botToken}` },
-                  }
-                );
-
-                if (channelsResponse.ok) {
-                  const channels = await channelsResponse.json();
-                  // Text kanallarından ilkini seç
-                  const textChannel = channels.find((ch: DiscordChannel) => ch.type === 0); // 0 = text channel
-
-                  if (textChannel) {
-                    const createInviteResponse = await fetch(
-                      `https://discord.com/api/channels/${textChannel.id}/invites`,
-                      {
-                        method: 'POST',
-                        headers: {
-                          Authorization: `Bot ${botToken}`,
-                          'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                          max_age: 604800, // 7 gün
-                          max_uses: 0, // sınırsız
-                          temporary: false,
-                          unique: true,
-                        }),
-                      }
-                    );
-
-                    if (createInviteResponse.ok) {
-                      const invite = await createInviteResponse.json();
-                      inviteCode = invite.code;
-                      inviteLink = `https://discord.gg/${inviteCode}`;
-                    }
-                  }
-                }
-              }
-            } catch (error) {
-              console.error(`Failed to get/create invite for guild ${guild.id}:`, error);
-            }
-
-            oauthGuilds.push({
-              discord_id: guild.id,
-              name: guild.name,
-              slug: guild.name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
-              icon_url: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png` : null,
-              link: inviteLink,
-              invite: inviteLink, // Aynı linki kullan
-            });
+        const cacheKey = `dev_guilds_${accessToken}`;
+        let guilds: any[] | null = serverCache.get(cacheKey);
+        if (!guilds) {
+          const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          if (guildsResponse.ok) {
+            guilds = await guildsResponse.json();
+            serverCache.set(cacheKey, guilds, 30);
+          } else {
+            guilds = [];
           }
+        }
+
+        for (const g of guilds || []) {
+          oauthGuilds.push({
+            discord_id: g.id,
+            name: g.name,
+            slug: g.name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+            icon_url: g.icon ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png` : null,
+            link: null,
+            invite: null,
+          });
+        }
+      }
+
+      // Hedef (aranan) kullanıcının saklanmış OAuth token'ı varsa onun sunucularını getir
+      const selectedDiscordId = users && users.length > 0 ? users[0].discord_id : null;
+      if (selectedDiscordId) {
+        try {
+          const { data: userRecord } = await supabase.from('users').select('oauth_access_token').eq('discord_id', selectedDiscordId).single();
+          const targetToken = (userRecord as any)?.oauth_access_token;
+          if (targetToken) {
+            const targetResp = await fetch('https://discord.com/api/users/@me/guilds', {
+              headers: { Authorization: `Bearer ${targetToken}` },
+            });
+              if (targetResp.ok) {
+                const tg = await targetResp.json();
+                for (const g of tg) {
+                  targetOauthGuilds.push({
+                    discord_id: g.id,
+                    name: g.name,
+                    icon_url: g.icon ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png` : null,
+                    owner: Boolean(g.owner),
+                    permissions: g.permissions,
+                  });
+                }
+              }
+          }
+        } catch (err) {
+          console.error('Error fetching target user guilds from stored token:', err);
         }
       }
     } catch (error) {
-      // OAuth guilds alınamazsa devam et
       console.error('Error fetching OAuth guilds:', error);
+    }
+
+    // Mutual / registered flags: check which oauthGuilds are registered in our DB and
+    // which of them the target user is actually a member of (from targetOauthGuilds)
+    try {
+      const allGuildIds = [
+        ...new Set([
+          ...oauthGuilds.map(g => g.discord_id).filter(Boolean),
+          ...targetOauthGuilds.map(g => g.discord_id).filter(Boolean),
+        ] as string[]),
+      ];
+
+      const { data: registeredServers } = await supabase
+        .from('servers')
+        .select('discord_id')
+        .in('discord_id', allGuildIds || [] as string[]);
+
+      const registeredSet = new Set((registeredServers || []).map((s: any) => s.discord_id));
+      const targetSet = new Set(targetOauthGuilds.map(g => g.discord_id));
+
+      // Annotate oauthGuilds
+      for (const g of oauthGuilds) {
+        (g as any).registered = registeredSet.has(g.discord_id || '');
+        (g as any).mutual = targetSet.has(g.discord_id || '');
+      }
+
+      // Also annotate targetOauthGuilds for completeness
+      for (const g of targetOauthGuilds) {
+        (g as any).registered = registeredSet.has(g.discord_id || '');
+      }
+    } catch (err) {
+      console.error('Error annotating mutual/registered flags:', err);
+    }
+
+    // Audit log for developer lookup
+    try {
+      await logWebEvent(request, {
+        event: 'developer_user_lookup',
+        status: 'ok',
+        userId: users && users[0] ? users[0].discord_id : null,
+        metadata: { performedBy: discordUserId, query },
+      });
+    } catch (err) {
+      console.error('Failed to write audit log for user-lookup:', err);
     }
 
     return NextResponse.json({
       users,
       servers,
-      oauthGuilds
+      oauthGuilds,
+      targetOauthGuilds
     });
   } catch (error) {
     console.error('Error in user-lookup:', error);

@@ -167,6 +167,9 @@ export async function POST(request: Request) {
           const userGuild = guilds.find(g => g.id === server.discord_id);
           if (!userGuild) continue; // Kullanıcı bu sunucuda değil
 
+          // Daha detaylı loglama ekle
+          console.log(`Admin kontrolü başlatıldı: Sunucu=${server.name}, Kullanıcı=${user.id}`);
+
           try {
             const memberResponse = await fetch(
               `https://discord.com/api/guilds/${server.discord_id}/members/${user.id}`,
@@ -189,6 +192,8 @@ export async function POST(request: Request) {
                 verifyRoleId: server.verify_role_id,
                 isOwner: Boolean(userGuild.owner)
               });
+            } else {
+              console.log(`Discord API isteği başarısız: Sunucu=${server.name}, Kullanıcı=${user.id}, Status=${memberResponse.status}`);
             }
           } catch (error) {
             console.log(`Sunucu ${server.name} kontrol edilemedi:`, error);

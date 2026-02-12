@@ -63,20 +63,26 @@ export default function DeveloperPage() {
     const checkAccess = async () => {
       try {
         setAccessLoading(true);
-        const response = await fetch('/api/developer/access', { cache: 'no-store' });
-        if (response.ok) {
+        const response = await fetch('/api/developer/check-access', { credentials: 'include', cache: 'no-store' });
+        const data = (await response.json().catch(() => ({}))) as { hasAccess?: boolean; error?: string };
+
+        if (response.ok && data.hasAccess) {
           setAccessAllowed(true);
           setAccessError(null);
           return;
         }
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        if (data.error === 'developer_role_missing') {
-          setAccessError('Developer rolü tanımlı değil.');
-        } else if (data.error === 'unauthorized') {
+
+        // Handle different error cases from API
+        if (response.status === 401 || data.error === 'unauthorized') {
           setAccessError('Giriş yapmanız gerekiyor.');
-        } else {
+        } else if (response.status === 403 || data.error === 'forbidden') {
           setAccessError('Bu panele erişim izniniz yok.');
+        } else if (data.error === 'developer_role_missing') {
+          setAccessError('Developer rolü tanımlı değil.');
+        } else {
+          setAccessError('Geliştirici paneli doğrulaması yapılamadı.');
         }
+
         setAccessAllowed(false);
       } catch {
         setAccessError('Geliştirici paneli doğrulaması yapılamadı.');
@@ -111,9 +117,22 @@ export default function DeveloperPage() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      localStorage.clear();
+      if (typeof document !== 'undefined') {
+        document.cookie.split(';').forEach((c) => {
+          const name = c.split('=')[0].trim();
+          try {
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=${window.location.hostname}`;
+          } catch {
+            // ignore
+          }
+        });
+      }
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
       window.location.href = '/';
     } catch {
+      localStorage.clear();
       window.location.href = '/';
     }
   };
@@ -122,7 +141,7 @@ export default function DeveloperPage() {
     setSyncLoading(true);
     setSyncMessage(null);
     try {
-      const response = await fetch('/api/developer/sync-members', { method: 'POST' });
+      const response = await fetch('/api/developer/sync-members', { method: 'POST', credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setSyncMessage(data.message || 'Senkronizasyon tamamlandı.');

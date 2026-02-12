@@ -169,6 +169,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
   }
 
+  // Validate roleId exists in the selected guild via Discord API
+  try {
+    const botToken = process.env.DISCORD_BOT_TOKEN;
+    if (!botToken) {
+      return NextResponse.json({ error: 'missing_bot_token' }, { status: 500 });
+    }
+
+    const rolesResp = await fetch(`https://discord.com/api/guilds/${selectedGuildId}/roles`, {
+      headers: { Authorization: `Bot ${botToken}` },
+    });
+
+    if (!rolesResp.ok) {
+      return NextResponse.json({ error: 'role_check_failed' }, { status: 500 });
+    }
+
+    const roles = (await rolesResp.json()) as Array<{ id: string }>;
+    const found = roles.some((r) => String(r.id) === String(payload.roleId));
+    if (!found) {
+      return NextResponse.json({ error: 'invalid_role', message: 'Rol bilgileri yanlış' }, { status: 400 });
+    }
+  } catch (e) {
+    return NextResponse.json({ error: 'role_check_error' }, { status: 500 });
+  }
+
   if (typeof payload.durationDays !== 'number' || payload.durationDays < 0) {
     return NextResponse.json({ error: 'invalid_duration' }, { status: 400 });
   }
@@ -261,6 +285,31 @@ export async function PUT(request: Request) {
 
   if (!payload.id || !payload.title || typeof payload.price !== 'number' || !payload.roleId) {
     return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
+  }
+
+  // Validate roleId exists in the selected guild via Discord API for update as well
+  try {
+    const botToken = process.env.DISCORD_BOT_TOKEN;
+    if (!botToken) {
+      return NextResponse.json({ error: 'missing_bot_token' }, { status: 500 });
+    }
+
+    const selectedGuildId = await getSelectedGuildId();
+    const rolesResp = await fetch(`https://discord.com/api/guilds/${selectedGuildId}/roles`, {
+      headers: { Authorization: `Bot ${botToken}` },
+    });
+
+    if (!rolesResp.ok) {
+      return NextResponse.json({ error: 'role_check_failed' }, { status: 500 });
+    }
+
+    const roles = (await rolesResp.json()) as Array<{ id: string }>;
+    const found = roles.some((r) => String(r.id) === String(payload.roleId));
+    if (!found) {
+      return NextResponse.json({ error: 'invalid_role', message: 'Rol bilgileri yanlış' }, { status: 400 });
+    }
+  } catch (e) {
+    return NextResponse.json({ error: 'role_check_error' }, { status: 500 });
   }
 
   if (typeof payload.durationDays !== 'number' || payload.durationDays < 0) {

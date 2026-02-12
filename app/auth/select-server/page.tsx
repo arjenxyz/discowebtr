@@ -70,7 +70,7 @@ export default function SelectServerPage() {
         console.log('SelectServer: Found user ID, fetching user info:', userId);
         // Discord API'den kullanıcı bilgilerini al
         const response = await fetch(`/api/discord/user/${userId}`);
-        console.log('SelectServer: API response status:', response.status);
+        console.log('SelectServer: API response status:', response.status, { credentials: 'include' });
         
         if (response.ok) {
           const userData = await response.json();
@@ -159,6 +159,28 @@ export default function SelectServerPage() {
         console.log('Filtered guilds (user is still member):', withSetupStatus);
         setGuilds(withSetupStatus);
 
+        // Developer rolü kontrolü yap
+        try {
+          console.log('Checking developer access for auto-redirect...');
+          const developerResponse = await fetch('/api/developer/check-access', { credentials: 'include', cache: 'no-store' });
+          if (developerResponse.ok) {
+            const data = await developerResponse.json() as { hasAccess: boolean };
+            if (data.hasAccess) {
+              console.log('User has developer access, redirecting to developer panel');
+              // İlk sunucuyu seç veya hiç sunucu olmasa bile developer paneline git
+              if (withSetupStatus.length > 0) {
+                const firstGuild = withSetupStatus[0];
+                document.cookie = `selected_guild_id=${firstGuild.id}; path=/`;
+                localStorage.setItem('selectedGuildId', firstGuild.id);
+              }
+              router.replace('/developer');
+              return;
+            }
+          }
+        } catch (error) {
+          console.error('Developer access check failed:', error);
+        }
+
         // Eğer hiç üye olunan sunucu kalmadıysa, bot invite sayfasına yönlendir
         if (filteredGuilds.length === 0) {
           console.log('User is not a member of any guilds, redirecting to bot invite');
@@ -187,7 +209,7 @@ export default function SelectServerPage() {
     console.log('Setting up guild:', guildId);
     
     // Seçilen sunucu ID'sini session cookie'ye kaydet
-    // eslint-disable-next-line react-hooks/immutability
+     
     document.cookie = `selected_guild_id=${guildId}; path=/`;
     localStorage.setItem('selectedGuildId', guildId);
     
@@ -200,7 +222,7 @@ export default function SelectServerPage() {
     console.log('Available guilds:', guilds);
     
     // Seçilen sunucu ID'sini session cookie'ye kaydet
-    // eslint-disable-next-line react-hooks/immutability
+     
     document.cookie = `selected_guild_id=${guildId}; path=/`;
     localStorage.setItem('selectedGuildId', guildId);
 
@@ -213,11 +235,27 @@ export default function SelectServerPage() {
     
     console.log('isAdmin:', isAdmin, 'verifyRoleId:', verifyRoleId);
 
+    // Önce developer rolü kontrolü yap
+    try {
+      console.log('Checking developer access...');
+        const developerResponse = await fetch('/api/developer/check-access', { credentials: 'include', cache: 'no-store' });
+      if (developerResponse.ok) {
+        console.log('User has developer access, redirecting to developer panel');
+        // Developer yönlendirmesi yapılırken selected_guild_id cookie'sini de set et
+        document.cookie = `selected_guild_id=${guildId}; path=/`;
+        localStorage.setItem('selectedGuildId', guildId);
+        router.replace('/developer');
+        return;
+      }
+    } catch (error) {
+      console.error('Developer access check failed:', error);
+    }
+
     // Admin ise doğrudan admin paneline yönlendir
     if (isAdmin) {
       console.log('Redirecting to admin panel');
       // Admin yönlendirmesi yapılırken selected_guild_id cookie'sini de set et
-      // eslint-disable-next-line react-hooks/immutability
+       
       document.cookie = `selected_guild_id=${guildId}; path=/`;
       localStorage.setItem('selectedGuildId', guildId);
       router.replace('/admin');

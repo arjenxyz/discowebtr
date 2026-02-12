@@ -57,7 +57,7 @@ export default function BotInvitePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAgreementModal]);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     
     setHydrated(true);
     // Track page view
     if (typeof window !== 'undefined' && window.gtag) {

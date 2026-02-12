@@ -180,12 +180,12 @@ const getAdminProfile = async (userId: string) => {
   return { name: member.nick ?? member.user.username ?? 'Yetkili', avatarUrl };
 };
 
-const upsertWallet = async (supabase: SupabaseClient, userId: string, nextBalance: number, serverId: string) => {
+const upsertWallet = async (supabase: SupabaseClient, userId: string, nextBalance: number, guildId: string) => {
   await (supabase.from('member_wallets') as unknown as {
     upsert: (values: Record<string, unknown>, options?: { onConflict?: string }) => Promise<unknown>;
   }).upsert(
     {
-      guild_id: serverId,
+      guild_id: guildId,
       user_id: userId,
       balance: nextBalance,
       updated_at: new Date().toISOString(),
@@ -194,11 +194,11 @@ const upsertWallet = async (supabase: SupabaseClient, userId: string, nextBalanc
   );
 };
 
-const insertLedger = async (supabase: SupabaseClient, userId: string, amount: number, balanceAfter: number, serverId: string, metadata: Record<string, unknown>) => {
+const insertLedger = async (supabase: SupabaseClient, userId: string, amount: number, balanceAfter: number, guildId: string, metadata: Record<string, unknown>) => {
   await (supabase.from('wallet_ledger') as unknown as {
     insert: (values: Record<string, unknown>) => Promise<unknown>;
   }).insert({
-    guild_id: serverId,
+    guild_id: guildId,
     user_id: userId,
     amount,
     type: 'admin_adjust',
@@ -207,32 +207,7 @@ const insertLedger = async (supabase: SupabaseClient, userId: string, amount: nu
   });
 };
 
-const insertNotification = async (
-  supabase: SupabaseClient,
-  userId: string,
-  title: string,
-  body: string,
-  guildId: string,
-  createdBy: string | null,
-  authorName: string | null,
-  authorAvatarUrl: string | null,
-  imageUrl: string | null,
-) => {
-  await (supabase.from('notifications') as unknown as {
-    insert: (values: Record<string, unknown>) => Promise<unknown>;
-  }).insert({
-    guild_id: guildId,
-    title,
-    body,
-    type: 'mail',
-    status: 'published',
-    target_user_id: userId,
-    created_by: createdBy,
-    author_name: authorName,
-    author_avatar_url: authorAvatarUrl,
-    image_url: imageUrl,
-  });
-};
+
 
 export async function POST(request: Request) {
   if (!(await isAdminUser())) {
@@ -254,6 +229,8 @@ export async function POST(request: Request) {
     message?: string;
     imageUrl?: string;
   };
+
+  console.log('wallet POST payload:', payload);
 
   console.log('wallet POST payload:', payload);
 
@@ -336,10 +313,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'server_not_found' }, { status: 404 });
     }
 
-    const serverId = server.id;
-
-    await upsertWallet(supabase, targetUserId, Number(next.toFixed(2)), serverId);
-    await insertLedger(supabase, targetUserId, amount, Number(next.toFixed(2)), serverId, {
+    // Use the discord guild id (selectedGuildId) as guild identifier in wallets/ledger
+    await upsertWallet(supabase, targetUserId, Number(next.toFixed(2)), selectedGuildId);
+    await insertLedger(supabase, targetUserId, amount, Number(next.toFixed(2)), selectedGuildId, {
       mode: payload.mode,
       scope: payload.scope,
       adminId,
@@ -349,17 +325,6 @@ export async function POST(request: Request) {
     const content = payload.mode === 'add'
       ? formatMessage(message)
       : `Yetkili tarafından ${amount} papel bakiyenizden düşüldü.`;
-    await insertNotification(
-      supabase,
-      targetUserId,
-      title,
-      content,
-      selectedGuildId,
-      adminId,
-      adminProfile.name,
-      adminProfile.avatarUrl,
-      imageUrl,
-    );
 
     await logWebEvent(request, {
       event: 'admin_wallet_adjust',
@@ -403,7 +368,7 @@ export async function POST(request: Request) {
   const { data: wallets } = (await supabase
     .from('member_wallets')
     .select('user_id,balance')
-    .eq('guild_id', serverId)
+    .eq('guild_id', selectedGuildId)
     .in('user_id', approvedIds)) as unknown as { data: Array<{ user_id: string; balance: number }> | null };
 
   const targets = wallets ?? [];
@@ -413,8 +378,9 @@ export async function POST(request: Request) {
     const current = Number(wallet?.balance ?? 0);
     const next = payload.mode === 'add' ? current + amount : current - amount;
 
-    await upsertWallet(supabase, userId, Number(next.toFixed(2)), serverId);
-    await insertLedger(supabase, userId, amount, Number(next.toFixed(2)), serverId, {
+    // Use selectedGuildId (discord id string) when updating wallets/ledger
+    await upsertWallet(supabase, userId, Number(next.toFixed(2)), selectedGuildId);
+    await insertLedger(supabase, userId, amount, Number(next.toFixed(2)), selectedGuildId, {
       mode: payload.mode,
       scope: payload.scope,
       adminId,
@@ -424,17 +390,6 @@ export async function POST(request: Request) {
     const content = payload.mode === 'add'
       ? formatMessage(message)
       : `Yetkili tarafından ${amount} papel bakiyenizden düşüldü.`;
-    await insertNotification(
-      supabase,
-      userId,
-      title,
-      content,
-      selectedGuildId,
-      adminId,
-      adminProfile.name,
-      adminProfile.avatarUrl,
-      imageUrl,
-    );
   }
 
   await logWebEvent(request, {

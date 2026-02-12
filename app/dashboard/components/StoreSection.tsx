@@ -1,6 +1,27 @@
 'use client';
 
+import { useState, useMemo, useEffect, useRef } from 'react';
 import type { PurchaseFeedback, StoreItem } from '../types';
+import { 
+  LuStore, LuZap, LuClock, LuShield, LuInfo, 
+  LuSparkles, LuLoader, LuShoppingCart, LuChevronDown, LuChevronUp 
+} from 'react-icons/lu';
+import Image from 'next/image';
+import { useCart } from '../../../lib/cart';
+import CartDrawer from '../../../components/CartDrawer';
+import ProductDetailModal from './ProductDetailModal';
+
+// GIF pool for products — only penguin gifs from public/penguin
+const GIFS = [
+  '/penguin/cryformoney.gif',
+  '/penguin/yuppi.gif',
+  '/penguin/water.gif',
+  '/penguin/vspengu.gif',
+  '/penguin/moneypengu.gif',
+  '/penguin/hopidi.gif',
+  '/penguin/fri.gif',
+  '/penguin/salincak.gif',
+];
 
 type StoreSectionProps = {
   storeLoading: boolean;
@@ -8,7 +29,7 @@ type StoreSectionProps = {
   purchaseLoadingId: string | null;
   purchaseFeedback: PurchaseFeedback;
   onPurchase: (itemId: string) => void;
-  onAddToCart: (item: StoreItem) => void;
+  onAddToCart: (item: StoreItem) => void; 
   renderPapelAmount: (value: number) => React.ReactNode;
 };
 
@@ -21,79 +42,250 @@ export default function StoreSection({
   onAddToCart,
   renderPapelAmount,
 }: StoreSectionProps) {
-  return (
-    <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Mağaza</h2>
-      </div>
-      {storeLoading ? (
-        <p className="mt-3 text-sm text-white/60">Yükleniyor...</p>
-      ) : (
-        <div className="mt-4">
-          <h3 className="text-sm font-semibold text-white/70">Ürünler</h3>
-          {items.length ? (
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              {items.map((item) => (
-                <div key={item.id} className="rounded-xl border border-white/10 bg-[#0b0d12]/60 p-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-white/80">{item.title}</p>
-                    <span className="text-xs text-white/80">{renderPapelAmount(item.price)}</span>
-                  </div>
-                  {item.description && <p className="mt-2 text-xs text-white/50">{item.description}</p>}
-                  <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-white/50">
-                    <span className="rounded-full border border-white/10 px-2 py-1">
-                      {item.duration_days === 0 ? 'Süresiz' : `${item.duration_days} gün`}
-                    </span>
-                    {item.role_id && (
-                      <span className="rounded-full border border-white/10 px-2 py-1">Rol: {item.role_id}</span>
-                    )}
-                  </div>
+  const cart = useCart();
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [expandedItem, setExpandedItem] = useState<StoreItem | null>(null);
+  const gifMap = useMemo(() => {
+    const m = new Map<string, string | undefined>();
+    if (items.length === 0) return m;
 
-                  <div className="mt-3 grid gap-2">
+    // Assign GIFs deterministically based on item index
+    items.forEach((it, idx) => {
+      m.set(it.id, idx < GIFS.length ? GIFS[idx] : undefined);
+    });
+
+    if (items.length > GIFS.length) {
+      console.warn(`Not enough GIFs for all products: items=${items.length}, gifs=${GIFS.length}. Extra products will have no GIF.`);
+    }
+
+    return m;
+  }, [items]);
+
+  return (
+    <>
+      <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-white/5 backdrop-blur-2xl p-6 sm:p-8 shadow-2xl transition-all">
+        
+        {/* Glow Efektleri */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-[#5865F2]/10 rounded-full blur-[80px] pointer-events-none" />
+        <div className="absolute bottom-0 left-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-[80px] pointer-events-none" />
+
+        {/* --- HEADER --- */}
+        <div className="relative z-10 flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-[#5865F2] to-indigo-600 rounded-xl shadow-lg shadow-[#5865F2]/20">
+              <LuStore className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white tracking-tight">Mağaza</h2>
+              <p className="text-[11px] text-white/50 font-medium">Topluluğun en havalı eşyaları</p>
+            </div>
+          </div>
+        {/* Sepet Butonu */}
+          <button 
+            onClick={() => cart?.openCart()} 
+            className="relative flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white transition-all active:scale-95 group"
+          >
+            <LuShoppingCart className="w-5 h-5 group-hover:scale-110 transition-transform" />
+            
+            <span className="text-sm font-bold">Sepetim</span>
+
+            {/* Bildirim Balonu (Kırmızı) */}
+            {cart?.items.length > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow-sm border-[3px] border-[#0b0d12]">
+                {cart.items.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {storeLoading ? (
+          <div className="flex flex-col items-center justify-center py-24 text-white/60">
+            <LuLoader className="w-10 h-10 animate-spin text-[#5865F2] mb-3" />
+            <p className="text-sm font-medium">Yükleniyor...</p>
+          </div>
+        ) : (
+          <div className="relative z-10">
+            
+            {items.length ? (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {items.map((item) => (
+                  <div 
+                    key={item.id} 
+                    className="group relative flex flex-col justify-between overflow-hidden rounded-[24px] border border-white/10 bg-[#0b0d12] p-5 transition-all duration-500 hover:-translate-y-1 hover:shadow-[0_20px_50px_rgba(88,101,242,0.25)] hover:border-[#5865F2]/50"
+                  >
+                    {/* Expand button (small, top-right) */}
                     <button
                       type="button"
-                      onClick={() => onAddToCart(item)}
-                      className="w-full rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/5"
+                      onClick={() => setExpandedItem(item)}
+                      aria-label="Ürünü büyüt"
+                      className="absolute top-3 right-3 z-20 p-1.5 rounded-md bg-white/5 hover:bg-white/10 transition-colors text-white/70"
                     >
-                      Sepete Ekle
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                      </svg>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => onPurchase(item.id)}
-                      disabled={purchaseLoadingId === item.id}
-                      className={`w-full rounded-xl px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                        purchaseFeedback[item.id]?.status === 'success'
-                          ? 'bg-emerald-500 hover:bg-emerald-400'
-                          : purchaseFeedback[item.id]?.status === 'error'
-                            ? 'bg-rose-500 hover:bg-rose-400'
-                            : 'bg-indigo-500 hover:bg-indigo-400'
-                      }`}
-                    >
-                      {purchaseLoadingId === item.id
-                        ? 'İşleniyor...'
-                        : purchaseFeedback[item.id]?.message ?? 'Satın Al'}
-                    </button>
+                    
+                    {/* --- ARKA PLAN GIF KATMANI --- */}
+                    <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden rounded-[24px]">
+                        {/* 1. Siyah Perde (Yazıların okunması için) */}
+                        <div className="absolute inset-0 bg-[#0b0d12]/40 group-hover:bg-[#0b0d12]/30 transition-colors duration-500 z-10" />
+                        
+                        {/* 2. GIF'in Kendisi (daha görünür by default) */}
+                          <div className="absolute inset-0 z-0 opacity-60 scale-105 group-hover:opacity-90 group-hover:scale-110 transition-all duration-700 ease-out mix-blend-screen brightness-110">
+                            <Image 
+                              src={gifMap.get(item.id) ?? '/gif/image.gif'}
+                              alt="Background Effect" 
+                              fill 
+                              className="object-cover"
+                              unoptimized 
+                            />
+                          </div>
+                    </div>
+
+                    {/* --- İÇERİK (Z-INDEX ile üste alındı) --- */}
+                    <div className="relative z-10">
+                      {/* Fiyat & İkon */}
+                      <div className="flex items-start justify-between gap-2 mb-3">
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 border border-white/10 backdrop-blur-md shadow-lg">
+                             {renderPapelAmount(item.price)}
+                        </div>
+                        <div className="p-1.5 bg-white/10 rounded-lg text-white/50 group-hover:text-[#5865F2] group-hover:bg-white/20 transition-colors backdrop-blur-md">
+                          <LuSparkles className="w-4 h-4" />
+                        </div>
+                      </div>
+
+                      {/* Başlık */}
+                      <h3 className="font-bold text-white text-base leading-tight mb-1 group-hover:text-[#5865F2] transition-colors drop-shadow-md">
+                        {item.title}
+                      </h3>
+
+                      {/* Açıklama */}
+                      <p className="text-xs text-white/60 leading-relaxed line-clamp-2 min-h-[32px] group-hover:text-white/90 transition-colors whitespace-normal break-words max-w-full">
+                        {item.description || "Açıklama yok."}
+                      </p>
+
+                      {/* Etiketler */}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide border backdrop-blur-sm transition-colors ${
+                          (item.duration_days ?? 0) === 0 
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                            : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                        }`}>
+                          <LuClock className="w-3 h-3" />
+                          {(item.duration_days ?? 0) === 0 ? 'Süresiz' : `${item.duration_days ?? 0} Gün`}
+                        </span>
+                        
+                        {item.role_id && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-violet-500/10 text-violet-400 border border-violet-500/20 backdrop-blur-sm">
+                            <LuShield className="w-3 h-3" />
+                            Rol
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* --- GİZLİ AKSİYON ALANI (SÜRPRİZ EFEKTİ) --- */}
+                    {/* Hover olunca height artar ve opacity 1 olur, loading veya feedback varsa görünür kalır */}
+                    <div className={`relative z-10 grid grid-cols-[auto_1fr] gap-2 mt-4 transition-all duration-300 ease-out overflow-hidden ${purchaseLoadingId === item.id || purchaseFeedback[item.id] ? 'max-h-[60px] opacity-100' : 'max-h-0 opacity-0 group-hover:max-h-[60px] group-hover:opacity-100'}`}>
+                      
+                      {/* Sepet Butonu */}
+                      {(() => {
+                        const isInCart = cart?.items.some(it => it.itemId === item.id);
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (cart) cart.addToCart(item);
+                              onAddToCart(item);
+                            }}
+                            title={isInCart ? "Sepette Var" : "Sepete Ekle"}
+                            className={`flex items-center justify-center w-10 h-10 rounded-xl border backdrop-blur-md transition-all active:scale-95 ${
+                              isInCart
+                                ? 'border-emerald-500/30 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                                : 'border-white/10 bg-white/10 text-white/80 hover:bg-white/20 hover:text-white'
+                            }`}
+                          >
+                            <LuShoppingCart className="w-4 h-4" />
+                          </button>
+                        );
+                      })()}
+
+                      {/* Satın Al Butonu */}
+                      <button
+                        type="button"
+                        onClick={() => onPurchase(item.id)}
+                        disabled={purchaseLoadingId === item.id}
+                        className={`flex items-center justify-center gap-2 rounded-xl px-4 h-10 text-xs font-bold text-white transition-all shadow-lg active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 backdrop-blur-md ${
+                          purchaseFeedback[item.id]?.status === 'success'
+                            ? 'bg-emerald-500 hover:bg-emerald-400'
+                            : purchaseFeedback[item.id]?.status === 'error'
+                              ? 'bg-rose-500 hover:bg-rose-400'
+                              : 'bg-[#5865F2] hover:bg-[#4752C4]'
+                        }`}
+                      >
+                        {purchaseLoadingId === item.id ? (
+                          <LuLoader className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <>
+                            <LuZap className="w-4 h-4" />
+                            <span>{purchaseFeedback[item.id]?.message ?? 'Hemen Al'}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                  </div>
+                ))}
+              </div>
+            ) : (
+              /* BOŞ DURUM */
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                 <div className="w-24 h-24 mb-3 opacity-60 grayscale">
+                    <Image src="/gif/sungorbobcry.gif" alt="Empty" width={96} height={96} className="object-contain" unoptimized />
+                 </div>
+                 <h3 className="text-base font-bold text-white">Raflar Bomboş!</h3>
+                 <p className="text-white/40 text-xs mt-1">Şu an ürün yok, daha sonra gel.</p>
+              </div>
+            )}
+
+            {/* --- KOMPAKT BİLGİLENDİRME (AKORDEON) --- */}
+            <div className="mt-8">
+              <button 
+                onClick={() => setInfoOpen(!infoOpen)}
+                className="w-full flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-1.5 bg-[#5865F2]/20 rounded-lg text-[#5865F2]">
+                    <LuInfo className="w-4 h-4" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold text-white group-hover:text-[#5865F2] transition-colors">Önemli Bilgiler</p>
+                    <p className="text-[10px] text-white/40">Alışveriş öncesi okumanız gerekenler</p>
                   </div>
                 </div>
-              ))}
+                {infoOpen ? <LuChevronUp className="text-white/40" /> : <LuChevronDown className="text-white/40" />}
+              </button>
+
+              <div className={`overflow-hidden transition-all duration-300 ease-in-out ${infoOpen ? 'max-h-[500px] opacity-100 mt-2' : 'max-h-0 opacity-0'}`}>
+                <div className="p-4 rounded-2xl bg-black/20 border border-white/5 text-xs text-white/60 space-y-2">
+                  <p>• Papel kazanmak için sohbet kanallarını kullanın.</p>
+                  <p>• Süreli roller, süre bitiminde otomatik silinir.</p>
+                  <p>• İndirim kuponları sadece belirli kategorilerde geçerli olabilir.</p>
+                  <p>• Satın alınan ürünlerin iadesi (yetki suistimali hariç) yapılmaz.</p>
+                </div>
+              </div>
             </div>
-          ) : (
-            <p className="mt-3 text-sm text-white/60">Henüz ürün yok.</p>
-          )}
-          <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-indigo-300">Bilgilendirme</p>
-            <ul className="mt-3 list-disc space-y-2 pl-5">
-              <li>Papel nedir, nasıl kasılır, nasıl harcanır gibi sorular için bilgilendirme kanalını inceleyin.</li>
-              <li>Aylık wall thread başlatıcı ve yazarı için bilgilendirmeyi okuyun.</li>
-              <li>Doğum günü rolünü almadan önce kuralları inceleyin.</li>
-              <li>Podcast, yarışma, turnuva gibi etkinliklerde ping almak isterseniz pingasm rolünü kullanın.</li>
-              <li>XP rollerini bırakmak için ilgili talep kanalını kullanın.</li>
-              <li>Market&apos;te &lt;&gt; içinde süre yazıyorsa rol o süre kadar profilinizde kalır.</li>
-              <li>Yetkileri suistimal eden kullanıcıların rolleri süreleri bitmeden kaldırılabilir.</li>
-            </ul>
+
           </div>
-        </div>
-      )}
-    </section>
+        )}
+      </section>
+      <CartDrawer />
+      <ProductDetailModal
+        item={expandedItem}
+        onClose={() => setExpandedItem(null)}
+        onAddToCart={onAddToCart}
+        onPurchase={(id) => onPurchase(id)}
+      />
+    </>
   );
 }

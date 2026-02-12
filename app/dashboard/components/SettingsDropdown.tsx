@@ -13,7 +13,7 @@ type SettingsDropdownProps = {
   onOpenPromotions: () => void;
   onOpenDiscounts: () => void;
   logoutHref: string; // Bu prop artık teknik olarak gereksiz ama type hatası vermemesi için kalsın
-  menuRef: RefObject<HTMLDivElement | null>;
+  menuRef: RefObject<HTMLDivElement>;
   profile?: {
     name: string;
     username: string;
@@ -39,12 +39,22 @@ export default function SettingsDropdown({
   // YENİ EKLENEN FONKSİYON
   const handleLogout = async () => {
     try {
-      // API'ye POST isteği atıyoruz
-      await fetch('/api/auth/logout', { method: 'POST' });
-      // İşlem bitince ana sayfaya zorla yönlendiriyoruz (Cache temizlensin diye)
+      if (typeof document !== 'undefined') {
+        document.cookie.split(';').forEach((cookie) => {
+          const eqPos = cookie.indexOf('=');
+          const name = eqPos > -1 ? cookie.substr(0, eqPos) : cookie;
+          try {
+            document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+            document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=${window.location.hostname}`;
+          } catch (e) {
+            // ignore
+          }
+        });
+      }
+      localStorage.clear();
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
       window.location.href = '/';
     } catch {
-      // Hata olsa bile kullanıcıyı dışarı atalım
       window.location.href = '/';
     }
   };
@@ -89,7 +99,7 @@ export default function SettingsDropdown({
         <LuChevronDown className={`h-4 w-4 text-white/50 transition ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="absolute right-0 z-50 mt-3 w-64 rounded-2xl border border-white/10 bg-[#0f1116] p-4 shadow-2xl">
+        <div className="absolute right-0 z-10 mt-3 w-64 rounded-2xl border border-white/10 bg-[#0f1116] p-4 shadow-2xl">
           <p className="text-sm font-semibold text-white">Hesap</p>
           <p className="mt-1 text-xs text-white/50">{displayName} · @{username}</p>
           <div className="mt-3 space-y-2">

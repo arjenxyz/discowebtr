@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { logWebEvent } from '@/lib/serverLogger';
+import { discordFetch } from '@/lib/discordRest';
 
 const GUILD_ID = process.env.DISCORD_GUILD_ID ?? '1465698764453838882';
 const DEFAULT_SLUG = 'default';
@@ -60,9 +61,9 @@ const isAdminUser = async () => {
     console.log('store-orders isAdminUser: Admin role ID:', server.admin_role_id);
 
     // Check Discord API for user roles
-    const memberResponse = await fetch(`https://discord.com/api/guilds/${selectedGuildId}/members/${userId}`, {
+    const memberResponse = await discordFetch(`https://discord.com/api/guilds/${selectedGuildId}/members/${userId}`, {
       headers: { Authorization: `Bot ${botToken}` },
-    });
+    }, { retries: 2 });
 
     console.log('store-orders isAdminUser: Member response status:', memberResponse.status);
 
@@ -90,9 +91,9 @@ const getDiscordUser = async (userId: string) => {
       return null;
     }
 
-    const response = await fetch(`https://discord.com/api/users/${userId}`, {
+    const response = await discordFetch(`https://discord.com/api/users/${userId}`, {
       headers: { Authorization: `Bot ${botToken}` },
-    });
+    }, { retries: 2 });
 
     if (!response.ok) {
       return null;
@@ -118,9 +119,9 @@ const checkUserHasRole = async (userId: string, roleId: string) => {
     }
 
     const selectedGuildId = await getSelectedGuildId();
-    const memberResponse = await fetch(`https://discord.com/api/guilds/${selectedGuildId}/members/${userId}`, {
+    const memberResponse = await discordFetch(`https://discord.com/api/guilds/${selectedGuildId}/members/${userId}`, {
       headers: { Authorization: `Bot ${botToken}` },
-    });
+    }, { retries: 2 });
 
     if (!memberResponse.ok) {
       return false;
@@ -396,10 +397,93 @@ export async function POST(request: Request) {
     if (order.status !== 'pending') {
       return NextResponse.json({ error: 'invalid_status' }, { status: 400 });
     }
-    await supabase
-      .from('store_orders')
-      .update({ status: 'paid', applied_at: null, failure_reason: null })
-      .eq('id', order.id);
+    // Attempt to assign roles via Discord REST before marking paid.
+    try {
+      const { data: fullOrder } = await supabase.from('store_orders').select('id,user_id,items,role_id').eq('id', order.id).maybeSingle();
+      const botToken = process.env.DISCORD_BOT_TOKEN;
+      if (!botToken) {
+        await supabase.from('store_orders').update({ status: 'failed', failure_reason: 'missing_bot_token' }).eq('id', order.id);
+        return NextResponse.json({ error: 'missing_bot_token' }, { status: 500 });
+      }
+
+      // fetch guild roles
+      const rolesRes = await fetch(`https://discord.com/api/guilds/${selectedGuildId}/roles`, { headers: { Authorization: `Bot ${botToken}` } });
+      if (!rolesRes.ok) {
+        await supabase.from('store_orders').update({ status: 'failed', failure_reason: 'roles_fetch_failed' }).eq('id', order.id);
+        return NextResponse.json({ error: 'roles_fetch_failed' }, { status: 500 });
+      }
+      const rolesList = await rolesRes.json();
+
+      // bot identity
+      const meRes = await fetch('https://discord.com/api/users/@me', { headers: { Authorization: `Bot ${botToken}` } });
+      const me = meRes.ok ? await meRes.json().catch(() => null) : null;
+      const botId = me?.id;
+      let botMember = null;
+      if (botId) {
+        const botMemberRes = await fetch(`https://discord.com/api/guilds/${selectedGuildId}/members/${botId}`, { headers: { Authorization: `Bot ${botToken}` } });
+        if (botMemberRes.ok) botMember = await botMemberRes.json().catch(() => null);
+      }
+
+      let botMaxPos = -1;
+      let botPerms = 0n;
+      if (botMember && Array.isArray(botMember.roles)) {
+        for (const rId of botMember.roles) {
+          const r = (rolesList || []).find((x: any) => String(x.id) === String(rId));
+          if (r) {
+            botMaxPos = Math.max(botMaxPos, Number(r.position ?? 0));
+            try { botPerms = BigInt(botPerms) | BigInt(r.permissions || 0); } catch (e) {}
+          }
+        }
+      }
+      const MANAGE_ROLES = BigInt(0x10000000);
+
+      const itemsToAssign = (fullOrder?.items ?? []).filter((it: any) => it.role_id);
+      for (const it of itemsToAssign) {
+        const targetRole = (rolesList || []).find((r: any) => String(r.id) === String(it.role_id));
+        if (!targetRole) {
+          await supabase.from('store_orders').update({ status: 'failed', failure_reason: 'invalid_role_id' }).eq('id', order.id);
+          return NextResponse.json({ error: 'invalid_role_id', message: 'Ürün rolü sunucuda bulunamadı.' }, { status: 400 });
+        }
+
+        const targetPos = Number(targetRole.position ?? 0);
+        if (botPerms && (botPerms & MANAGE_ROLES) !== MANAGE_ROLES) {
+          await supabase.from('store_orders').update({ status: 'failed', failure_reason: 'bot_missing_manage_roles' }).eq('id', order.id);
+          return NextResponse.json({ error: 'bot_missing_manage_roles', message: 'Botun rol yönetimi yetkisi yok.' }, { status: 403 });
+        }
+        if (botMaxPos >= 0 && botMaxPos <= targetPos) {
+          await supabase.from('store_orders').update({ status: 'failed', failure_reason: 'bot_role_hierarchy' }).eq('id', order.id);
+          return NextResponse.json({ error: 'bot_role_hierarchy', message: 'Botun rol hiyerarşisi yetmiyor.' }, { status: 403 });
+        }
+
+        const assignRes = await fetch(`https://discord.com/api/guilds/${selectedGuildId}/members/${fullOrder.user_id}/roles/${it.role_id}`, { method: 'PUT', headers: { Authorization: `Bot ${botToken}` } });
+        if (!assignRes.ok) {
+          const respText = await assignRes.text().catch(() => '');
+          await supabase.from('store_orders').update({ status: 'failed', failure_reason: 'role_assign_failed', failure_code: assignRes.status, failure_response: respText }).eq('id', order.id);
+
+          // insert delivery-failure system mail
+          try {
+            const siteUrl = process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || '';
+            const normalizedSite = siteUrl ? siteUrl.replace(/\/$/, '') : '';
+            const refundUrl = normalizedSite ? `${normalizedSite}/api/member/refund?orderId=${order.id}` : null;
+            const { refundButtonHtml } = await import('@/lib/mailHelpers');
+            const buttonHtml = refundButtonHtml('role_assign_failed', refundUrl);
+            const html = `<!doctype html><html><head><meta charset="utf-8"></head><body style="background:#0f1113;color:#e6eef8;font-family:Inter,system-ui,Arial;padding:20px"><div style="max-width:600px;margin:0 auto;background:#0b0c0d;padding:20px;border-radius:12px"><div style="display:flex;gap:12px;align-items:center"><div style="width:48px;height:48;border-radius:10px;background:linear-gradient(135deg,#5865F2,#8b5cf6);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff">FOX</div><div><div style="font-weight:800">🛠️ Sistem Raporu: İşlem Kesintisi Bildirimi</div><div style="color:#b9bbbe;font-size:13px">DiscoWeb</div></div></div><div style="margin-top:12px;background:#111214;padding:14px;border-radius:10px;line-height:1.6"><p>Merhaba, ben DiscoWeb Baş Geliştiricisi.</p><p>Satın alma teslimatı sırasında bir hata oluştu. Ödeme düşülmeden önce rol verme işlemi başarısız oldu.</p><div style="font-family:Courier New,monospace;background:rgba(255,255,255,0.02);padding:12px;border-radius:8px;margin-top:12px">Durum: <strong>FAILED_TO_DELIVER</strong><br>Hata Kodu: <strong>ROLE_ASSIGN_FAILED</strong><br>HTTP: ${assignRes.status}</div><p style="margin-top:12px">Aşağıdaki butonu kullanarak iade talebini başlatabilirsin.</p><div style="margin-top:10px">${buttonHtml}</div><p style="margin-top:12px;color:#9aa0a6">Yaşanan aksaklık için üzgünüz.</p></div></div></body></html>`;
+            await supabase.from('system_mails').insert({ guild_id: serverId, user_id: fullOrder.user_id, title: '🛠️ Sistem Raporu: İşlem Kesintisi Bildirimi', body: html, category: 'system', status: 'published', author_name: 'DiscoWeb Baş Geliştiricisi', created_at: new Date().toISOString() });
+          } catch (e) {
+            console.warn('Failed to insert delivery-failure mail', e);
+          }
+
+          return NextResponse.json({ error: 'role_assign_failed', message: 'Rol teslimatı başarısız oldu. Para düşülmedi.' }, { status: 400 });
+        }
+      }
+
+      // All role assignments succeeded — mark paid
+      await supabase.from('store_orders').update({ status: 'paid', applied_at: new Date().toISOString(), failure_reason: null }).eq('id', order.id);
+    } catch (err) {
+      console.error('Admin approve - role assign error:', err);
+      await supabase.from('store_orders').update({ status: 'failed', failure_reason: 'role_precheck_error' }).eq('id', order.id);
+      return NextResponse.json({ error: 'role_precheck_error' }, { status: 500 });
+    }
 
     await logWebEvent(request, {
       event: 'admin_store_order_approve',
